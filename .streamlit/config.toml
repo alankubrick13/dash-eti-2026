@@ -1,0 +1,106 @@
+# Configuração do Streamlit para o painel de acompanhamento da formação ETI.
+# Estilo editorial adotado pela coordenação: fonte Inter, tinta quase preta e
+# verde-petróleo como cor de destaque. Detalhes: README.md, seção "Identidade visual".
+
+[client]
+# Nada de rastreamento de exceção no navegador: mensagens de erro não podem
+# vazar dados pessoais nem detalhes internos.
+showErrorDetails = "none"
+toolbarMode = "minimal"
+# Exportações passam pelos relatórios controlados do próprio painel.
+# (Isto não é controle de segurança: apenas evita botões de cópia/CSV nas tabelas.)
+disableDataExport = true
+showErrorLinks = false
+
+[server]
+# 120 MB para o pacote de microdados do Inep; planilhas são limitadas a 25 MB no código.
+maxUploadSize = 120
+enableXsrfProtection = true
+enableStaticServing = true
+runOnSave = false
+
+[browser]
+gatherUsageStats = false
+
+[runner]
+magicEnabled = false
+
+[theme]
+base = "light"
+primaryColor = "#0E6F7C"
+backgroundColor = "#FFFFFF"
+secondaryBackgroundColor = "#F4F6F7"
+textColor = "#1F2933"
+linkColor = "#0E6F7C"
+borderColor = "#E4E7EB"
+dataframeBorderColor = "#E4E7EB"
+dataframeHeaderBackgroundColor = "#F4F6F7"
+dataframeHeaderTextColor = "#1F2933"
+showWidgetBorder = true
+showSidebarBorder = true
+baseRadius = "6px"
+buttonRadius = "6px"
+baseFontSize = 15
+font = "Inter, system-ui, sans-serif"
+headingFont = "Inter, system-ui, sans-serif"
+headingFontWeights = [700, 700, 700, 600, 600, 600]
+headingFontSizes = ["2rem", "1.35rem", "1.1rem", "1rem", "0.95rem", "0.9rem"]
+metricValueFontSize = "2rem"
+metricValueFontWeight = 700
+blueColor = "#2A6FDB"
+blueBackgroundColor = "#E8F0FC"
+blueTextColor = "#1D4FA0"
+greenColor = "#0E6F7C"
+greenBackgroundColor = "#E6F1F2"
+greenTextColor = "#0B5560"
+yellowColor = "#B7860B"
+yellowBackgroundColor = "#FBF3DC"
+yellowTextColor = "#7A5A00"
+redColor = "#C2412D"
+redBackgroundColor = "#FBEAE7"
+redTextColor = "#9A2E1F"
+orangeColor = "#C8652A"
+orangeBackgroundColor = "#FBEEE6"
+orangeTextColor = "#8F3F12"
+violetColor = "#6A4BC4"
+violetBackgroundColor = "#F1EDFA"
+violetTextColor = "#5A3B9E"
+grayColor = "#5B6670"
+grayBackgroundColor = "#EEF0F2"
+grayTextColor = "#4A545E"
+chartCategoricalColors = ["#0E6F7C", "#4E939C", "#88B7BD", "#BAD6DA"]
+chartSequentialColors = ["#E1ECEE", "#C9DDE0", "#B0CED2", "#97BFC4", "#7EB0B6", "#66A1A8", "#4E939C", "#37858F", "#227A86", "#0E6F7C"]
+
+[[theme.fontFaces]]
+family = "Inter"
+url = "app/static/fonts/inter-latin.woff2"
+weight = 400
+style = "normal"
+
+[[theme.fontFaces]]
+family = "Inter"
+url = "app/static/fonts/inter-latin.woff2"
+weight = 500
+style = "normal"
+
+[[theme.fontFaces]]
+family = "Inter"
+url = "app/static/fonts/inter-latin.woff2"
+weight = 600
+style = "normal"
+
+[[theme.fontFaces]]
+family = "Inter"
+url = "app/static/fonts/inter-latin.woff2"
+weight = 700
+style = "normal"
+
+[[theme.fontFaces]]
+family = "Inter"
+url = "app/static/fonts/inter-latin.woff2"
+weight = 800
+style = "normal"
+
+[theme.sidebar]
+backgroundColor = "#F4F6F7"
+secondaryBackgroundColor = "#FFFFFF"

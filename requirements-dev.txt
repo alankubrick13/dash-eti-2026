@@ -1,0 +1,3 @@
+# Ferramentas de desenvolvimento e testes (não são necessárias para executar o painel).
+-r requirements.txt
+pytest==9.1.1

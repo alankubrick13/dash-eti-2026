@@ -1,0 +1,8 @@
+# Dependências de execução (versões testadas em 21/10/2026, Python 3.12+; testado em 3.14).
+# streamlit[auth] inclui o Authlib, usado no login OIDC nativo (st.login) em produção.
+streamlit[auth]==1.66.1
+pandas==3.0.6
+plotly==7.1.0
+openpyxl==3.1.5
+requests==2.34.2
+certifi==2026.10.19

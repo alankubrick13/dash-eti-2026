@@ -1,0 +1,70 @@
+# ------------------------------------------------------------------
+# Dados pessoais: NUNCA versionar planilhas, exportações, bancos ou backups.
+# Repositório privado não é proteção de dados.
+# ------------------------------------------------------------------
+
+# Planilhas e exportações em qualquer pasta
+*.xlsx
+*.xlsm
+*.xls
+*.ods
+*.csv
+*.tsv
+*.parquet
+*.feather
+*.json.gz
+# Texto copiado do Moodle e similares (a raiz do projeto costuma receber esses arquivos)
+/*.txt
+!/requirements.txt
+!/requirements-dev.txt
+
+# Bancos de dados, backups e caches locais
+*.sqlite
+*.sqlite3
+*.sqlite3-*
+*.db
+*.db-*
+*.zip
+*.bak
+*.backup
+*.dump
+data/*
+!data/README.md
+!data/referencias/
+!data/referencias/**
+!data/synthetic/
+data/synthetic/*
+!data/synthetic/README.md
+
+# Referência pública do IBGE (não contém dados pessoais) — permitida explicitamente
+!data/referencias/municipios_ibge.csv
+
+# Segredos e configurações locais
+.env
+.env.*
+!.env.example
+.streamlit/secrets.toml
+*.pem.key
+*.key
+
+
+# Python / ambiente
+.venv/
+venv/
+__pycache__/
+*.py[cod]
+.pytest_cache/
+.mypy_cache/
+.ruff_cache/
+.coverage
+htmlcov/
+*.egg-info/
+
+# Editores e sistema
+.vscode/
+.idea/
+.DS_Store
+*.swp
+
+# Logo original enviada pela coordenação (o app usa a cópia em assets/marca/)
+/images.png

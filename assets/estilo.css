@@ -1,0 +1,1069 @@
+/*
+ * Estilo do painel. Cores e fonte-base vêm do tema (.streamlit/config.toml); aqui ficam os
+ * componentes próprios (classes eti-* e viz-*) e poucos ajustes em elementos do Streamlit,
+ * sempre por data-testid. Testado com Streamlit 1.66.
+ */
+
+:root {
+  --tinta: #1F2933;
+  --tinta-suave: #5B6670;
+  --tinta-fraca: #7B8794;
+  --petroleo: #0E6F7C;
+  --borda: #E4E7EB;
+  --fundo-2: #F4F6F7;
+}
+
+[data-testid="stMainBlockContainer"] {
+  max-width: 1320px;
+  padding-top: 1.5rem;
+}
+
+/*
+ * Colunas de conteúdo (ui.colunas): o Streamlit só empilha colunas abaixo de 640 px de janela;
+ * aqui elas também empilham quando a área útil não comporta cada uma com 18rem (ex.: 1024 px com a
+ * barra lateral aberta), em vez de espremer gráficos e tabelas.
+ */
+[class*="st-key-colunas_"] > [data-testid="stHorizontalBlock"] > [data-testid="stColumn"],
+[class*="st-key-colunas_"] > [data-testid="stLayoutWrapper"] > [data-testid="stHorizontalBlock"] > [data-testid="stColumn"] {
+  min-width: min(100%, 18rem);
+}
+
+/* ---------------------------------------------------------------- cabeçalho */
+.eti-cabecalho {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 1rem 2.25rem;
+  padding: 0.25rem 0 1.1rem 0;
+  border-bottom: 1px solid var(--borda);
+  margin-bottom: 0.5rem;
+}
+.eti-marca-bloco {
+  padding: 0.4rem 0.6rem 0.4rem 0;  /* área de proteção da marca */
+}
+.eti-marca {
+  display: block;
+  width: 190px;
+  min-width: 157px;
+  height: auto;
+}
+.eti-identidade {
+  flex: 1 1 18rem;
+}
+.eti-programa {
+  font-size: 0.78rem;
+  font-weight: 700;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  color: var(--petroleo);
+}
+.eti-ferramenta {
+  font-size: 1.25rem;
+  font-weight: 700;
+  letter-spacing: -0.01em;
+  color: var(--tinta);
+}
+.eti-territorio {
+  font-size: 1rem;
+  color: var(--tinta-suave);
+  margin-top: 0.1rem;
+}
+.eti-natureza {
+  font-size: 0.78rem;
+  color: var(--tinta-fraca);
+  margin-top: 0.3rem;
+}
+.eti-refs {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.5rem 1.75rem;
+}
+.eti-ref {
+  display: flex;
+  flex-direction: column;
+}
+.eti-ref-rotulo {
+  font-size: 0.72rem;
+  font-weight: 600;
+  letter-spacing: 0.05em;
+  text-transform: uppercase;
+  color: var(--tinta-fraca);
+}
+.eti-ref-valor {
+  font-size: 0.88rem;
+  color: var(--tinta);
+}
+.eti-demo {
+  margin: 0.75rem 0 0 0;
+  padding: 0.5rem 0.8rem;
+  border-left: 3px solid var(--petroleo);
+  background: #EAF3F4;
+  color: #0B4F59;
+  font-size: 0.85rem;
+}
+
+/* ---------------------------------------------------------------- texto */
+h1 {
+  letter-spacing: -0.02em;
+}
+.eti-lead {
+  font-size: 1.05rem;
+  color: var(--tinta-suave);
+  max-width: 50rem;
+  margin: -0.35rem 0 0.9rem 0;
+  line-height: 1.55;
+}
+.eti-descricao {
+  font-size: 0.95rem;
+  color: var(--tinta-suave);
+  max-width: 50rem;
+  margin: -0.45rem 0 0.6rem 0;
+  line-height: 1.5;
+}
+.eti-nota {
+  font-size: 0.82rem;
+  color: var(--tinta-suave);
+  margin: 0.2rem 0 0.6rem 0;
+  line-height: 1.45;
+}
+.eti-metrica-contexto {
+  font-size: 0.82rem;
+  color: var(--tinta-suave);
+  margin: -0.55rem 0 0.25rem 0;
+  line-height: 1.35;
+}
+.eti-vazio {
+  padding: 1.25rem;
+  border: 1px dashed var(--borda);
+  border-radius: 8px;
+  color: var(--tinta-suave);
+  font-size: 0.92rem;
+  background: var(--fundo-2);
+}
+
+/* Indicadores */
+[data-testid="stMetricLabel"] p {
+  font-size: 0.88rem;
+  color: var(--tinta-suave);
+  font-weight: 500;
+}
+[data-testid="stMetricLabel"] [data-testid="stMarkdownContainer"],
+[data-testid="stMetricLabel"] p {
+  white-space: normal;
+  overflow: visible;
+  text-overflow: clip;
+}
+/* O valor diminui em colunas estreitas (ex.: cinco indicadores em 1024 px), em vez de ser cortado */
+[data-testid="stMetric"] {
+  container-type: inline-size;
+}
+[data-testid="stMetricValue"] {
+  font-size: clamp(1.3rem, 24cqi, 2rem);
+  letter-spacing: -0.02em;
+}
+
+/* ---------------------------------------------------------------- figuras (viz-*) */
+/*
+ * Cada figura é um contêiner de consulta (container queries): o gráfico se adapta à largura da
+ * coluna em que está, não à da janela. Barras e blocos também são contêineres, para que um número
+ * só apareça dentro deles quando couber (classes viz-lN: texto de até N caracteres).
+ */
+.viz {
+  container: viz / inline-size;
+  margin: 0.6rem 0 0.4rem 0;
+  color: var(--tinta);
+}
+.viz-chamada {
+  font-size: 0.9rem;
+  color: var(--tinta-suave);
+  margin-bottom: 0.2rem;
+}
+.viz-titulo {
+  font-size: 1.2rem;
+  font-weight: 700;
+  letter-spacing: -0.01em;
+  line-height: 1.25;
+}
+.viz-destaque .viz-titulo {
+  font-size: 1.65rem;
+  letter-spacing: -0.02em;
+}
+.viz-sub {
+  font-size: 0.95rem;
+  color: var(--tinta-suave);
+  line-height: 1.5;
+  max-width: 36rem;
+  margin: 0.35rem 0 0 0;
+}
+.viz-corpo {
+  margin-top: 1.25rem;
+  overflow-x: auto;  /* último recurso: rolar, nunca cortar */
+}
+.viz-corpo-solto {
+  margin-top: 0.4rem;  /* título e controle já vieram acima (ui.cabecalho_grafico) */
+}
+.viz-legenda {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.35rem 1.4rem;
+  margin-top: 1.1rem;
+  font-size: 0.9rem;
+  color: var(--tinta-suave);
+}
+.viz-legenda span {
+  display: inline-flex;
+  align-items: center;
+}
+.viz-legenda i {
+  display: inline-block;
+  width: 0.9rem;
+  height: 0.7rem;
+  border-radius: 2px;
+  margin-right: 0.45rem;
+}
+.viz-nota,
+.viz-fonte {
+  font-size: 0.82rem;
+  color: var(--tinta-suave);
+  margin: 0.8rem 0 0 0;
+  line-height: 1.45;
+}
+.viz-nota + .viz-fonte {
+  margin-top: 0.3rem;
+}
+.viz-rotulo {
+  text-align: right;
+  font-size: 1rem;
+  color: var(--tinta);
+  line-height: 1.2;
+  overflow-wrap: anywhere;
+}
+
+/* Barras empilhadas: uma linha por categoria, contagem dentro de cada segmento */
+.viz-empilhado {
+  display: grid;
+  grid-template-columns: fit-content(38%) minmax(0, 1fr);
+  gap: 0.75rem 0.9rem;
+  align-items: center;
+}
+.viz-barra {
+  display: flex;
+  gap: 3px;
+  height: 2.6rem;
+  min-width: 0;
+}
+.viz-seg {
+  container-type: inline-size;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  min-width: 2px;
+  font-weight: 700;
+  font-size: 0.95rem;
+  font-variant-numeric: tabular-nums;
+  overflow: hidden;
+  white-space: nowrap;
+}
+.viz-seg span {
+  display: none;
+}
+@container (min-width: 1.9rem) { .viz-seg.viz-l2 span { display: inline; } }
+@container (min-width: 2.5rem) { .viz-seg.viz-l3 span { display: inline; } }
+@container (min-width: 3.4rem) { .viz-seg.viz-l5 span { display: inline; } }
+@container (min-width: 5.2rem) { .viz-seg.viz-l8 span { display: inline; } }
+
+/* Barras simples: escala descontada da largura do maior rótulo (--reserva) */
+.viz-barras {
+  display: grid;
+  grid-template-columns: fit-content(42%) minmax(0, 1fr);
+  gap: 0.55rem 0.9rem;
+  align-items: center;
+}
+.viz-trilho {
+  display: flex;
+  align-items: center;
+  height: 1.9rem;
+  min-width: 0;
+}
+.viz-preenchido {
+  container-type: inline-size;
+  position: relative;
+  height: 100%;
+  border-radius: 0 4px 4px 0;
+  display: flex;
+  align-items: center;
+  justify-content: flex-end;
+}
+.viz-valor-dentro {
+  display: none;
+  font-weight: 700;
+  font-size: 0.88rem;
+  padding: 0 0.45rem;
+  white-space: nowrap;
+}
+.viz-valor-fora {
+  position: absolute;
+  left: 100%;
+  top: 50%;
+  transform: translateY(-50%);
+  font-weight: 600;
+  font-size: 0.88rem;
+  color: var(--tinta-suave);
+  padding-left: 0.5rem;
+  white-space: nowrap;
+}
+@container (min-width: 2.5rem) { .viz-l2 > .viz-valor-dentro { display: inline; } .viz-l2 > .viz-valor-fora { display: none; } }
+@container (min-width: 3.2rem) { .viz-l3 > .viz-valor-dentro { display: inline; } .viz-l3 > .viz-valor-fora { display: none; } }
+@container (min-width: 4.4rem) { .viz-l5 > .viz-valor-dentro { display: inline; } .viz-l5 > .viz-valor-fora { display: none; } }
+@container (min-width: 6.3rem) { .viz-l8 > .viz-valor-dentro { display: inline; } .viz-l8 > .viz-valor-fora { display: none; } }
+@container (min-width: 8.8rem) { .viz-l12 > .viz-valor-dentro { display: inline; } .viz-l12 > .viz-valor-fora { display: none; } }
+@container (min-width: 11.3rem) { .viz-l16 > .viz-valor-dentro { display: inline; } .viz-l16 > .viz-valor-fora { display: none; } }
+@container (min-width: 13.8rem) { .viz-l20 > .viz-valor-dentro { display: inline; } .viz-l20 > .viz-valor-fora { display: none; } }
+
+/* Proporções: trilho claro = total; trecho escuro = parte */
+.viz-proporcao {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 0.2rem 0.6rem;
+  min-width: 0;
+}
+.viz-proporcao-trilho {
+  flex: 1 1 7rem;
+  height: 1.05rem;
+  border-radius: 4px;
+  background: #DCE8EA;
+  overflow: hidden;
+}
+.viz-proporcao-parte {
+  height: 100%;
+  background: var(--petroleo);
+}
+.viz-proporcao .viz-valor-fora {
+  position: static;
+  transform: none;
+  padding-left: 0;
+}
+
+/* Mapa de calor em blocos; o tamanho do número acompanha a largura do bloco */
+.viz-calor {
+  --bloco-min: 2.6rem;
+  display: grid;
+  grid-template-columns: fit-content(40%) repeat(var(--colunas), minmax(var(--bloco-min), 1fr));
+  gap: 0.5rem;
+  align-items: stretch;
+}
+.viz-calor-col {
+  text-align: center;
+  font-weight: 700;
+  color: var(--tinta-suave);
+  font-size: 0.95rem;
+  padding-bottom: 0.15rem;
+  overflow-wrap: anywhere;
+  min-width: 0;
+}
+.viz-calor-linha {
+  display: flex;
+  align-items: center;
+  justify-content: flex-end;
+  text-align: right;
+  font-size: 1rem;
+  padding-right: 0.5rem;
+  line-height: 1.2;
+}
+.viz-bloco {
+  container-type: inline-size;
+  border-radius: 7px;
+  padding: 0.55rem 0.15rem;
+  text-align: center;
+  line-height: 1.15;
+  font-variant-numeric: tabular-nums;
+  white-space: nowrap;
+  overflow: hidden;
+}
+.viz-bloco b {
+  display: block;
+  font-size: clamp(0.62rem, 25cqi, 1.15rem);
+  font-weight: 800;
+}
+.viz-bloco small {
+  display: block;
+  font-size: clamp(0.58rem, 17cqi, 0.78rem);
+  margin-top: 0.15rem;
+  opacity: 0.9;
+}
+.viz-bloco-vazio {
+  background: var(--fundo-2);
+  color: var(--tinta-fraca);
+}
+
+/* Figuras em colunas estreitas */
+@container viz (max-width: 34rem) {
+  .viz-destaque .viz-titulo { font-size: 1.4rem; }
+  .viz-rotulo, .viz-calor-linha { font-size: 0.9rem; }
+  .viz-calor-col { font-size: 0.85rem; }
+  .viz-calor { --bloco-min: 2.3rem; gap: 0.35rem; }
+  .viz-barra { height: 2.3rem; }
+  .viz-seg { font-size: 0.85rem; }
+}
+@container viz (max-width: 24rem) {
+  .viz-barras,
+  .viz-empilhado { grid-template-columns: minmax(0, 1fr); row-gap: 0.25rem; }
+  .viz-rotulo { text-align: left; margin-top: 0.5rem; }
+  .viz-calor { --bloco-min: 2.1rem; gap: 0.25rem; }
+  .viz-calor-linha { font-size: 0.8rem; padding-right: 0.25rem; }
+  .viz-bloco { padding: 0.45rem 0.1rem; }
+  .viz-bloco small { display: none; }
+}
+
+/* ---------------------------------------------------------------- ficha individual */
+.eti-dl {
+  display: grid;
+  grid-template-columns: minmax(8rem, 12.5rem) minmax(0, 1fr);
+  gap: 0.3rem 1rem;
+  margin: 0 0 0.9rem 0;
+  font-size: 0.92rem;
+  line-height: 1.45;
+}
+.eti-dl dt {
+  color: var(--tinta-suave);
+}
+.eti-dl dd {
+  margin: 0;
+  color: var(--tinta);
+  overflow-wrap: anywhere;
+}
+
+.eti-ficha-cabecalho {
+  margin: 0.2rem 0 0.9rem 0;
+}
+.eti-ficha-titulo {
+  font-size: 1.65rem;
+  font-weight: 700;
+  letter-spacing: -0.02em;
+  line-height: 1.2;
+  color: var(--tinta);
+}
+.eti-ficha-compacta .eti-ficha-titulo {
+  font-size: 1.25rem;
+}
+.eti-pilulas {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.4rem;
+  margin-top: 0.65rem;
+}
+.eti-pilulas:empty {
+  display: none;
+}
+.eti-pilula {
+  padding: 0.2rem 0.7rem;
+  border-radius: 999px;
+  background: #EAF3F4;
+  color: #0B4F59;
+  font-size: 0.82rem;
+  font-weight: 500;
+  line-height: 1.4;
+}
+
+/* O Streamlit recua listas dentro de st.html (padding-left: 2rem) */
+[data-testid="stHtml"] dl.eti-dl {
+  padding-left: 0;
+}
+
+/* ---------------------------------------------------------------- cartões clicáveis (ui.clicavel) */
+/*
+ * O cartão é HTML; um botão transparente (st.button, chave alvo_*) cobre o cartão inteiro, para
+ * que o clique em qualquer ponto abra a ficha. O rótulo do botão é o que o leitor de tela anuncia.
+ */
+[class*="st-key-clic_"] {
+  position: relative;
+}
+[class*="st-key-alvo_"] {
+  position: absolute !important;
+  inset: 0;
+  width: 100% !important;
+  height: 100% !important;
+  margin: 0;
+  z-index: 2;
+}
+[class*="st-key-alvo_"] [data-testid="stButton"],
+[class*="st-key-alvo_"] button {
+  width: 100%;
+  height: 100%;
+}
+[class*="st-key-alvo_"] button {
+  opacity: 0;
+  cursor: pointer;
+}
+[class*="st-key-clic_"]:has(button:focus-visible) :is(.eti-cartao, .eti-filtro, .eti-linha-pessoa) {
+  outline: 2px solid var(--petroleo);
+  outline-offset: 2px;
+}
+
+/*
+ * Grades de cartões (ui.grade) e de cartões de filtro (ui.filtros_em_cartoes): o contêiner do
+ * Streamlit vira uma grade CSS com tantas colunas quantas couberem; os cartões de uma mesma linha
+ * ficam com a mesma altura.
+ */
+[class*="st-key-grade_"],
+[class*="st-key-filtros_"] {
+  display: grid !important;
+  grid-template-columns: repeat(auto-fill, minmax(min(100%, 16.5rem), 1fr));
+  gap: 0.9rem;
+  align-items: stretch;
+}
+[class*="st-key-filtros_"] {
+  grid-template-columns: repeat(auto-fit, minmax(min(100%, 8.5rem), 1fr));
+  gap: 0.6rem;
+}
+:is([class*="st-key-grade_"], [class*="st-key-filtros_"]) > [data-testid="stLayoutWrapper"] > [class*="st-key-clic_"] {
+  height: 100%;
+}
+:is([class*="st-key-grade_"], [class*="st-key-filtros_"]) [class*="st-key-clic_"] > [data-testid="stElementContainer"]:first-child,
+:is([class*="st-key-grade_"], [class*="st-key-filtros_"]) [class*="st-key-clic_"] > [data-testid="stElementContainer"]:first-child > [data-testid="stHtml"] {
+  display: flex;
+  flex-direction: column;
+  flex: 1 1 auto;
+}
+:is([class*="st-key-grade_"], [class*="st-key-filtros_"]) :is(.eti-cartao, .eti-filtro) {
+  flex: 1 1 auto;
+}
+
+.eti-icone {
+  font-family: "Material Symbols Rounded";
+  font-weight: normal;
+  font-style: normal;
+  font-size: 1.1rem;
+  line-height: 1;
+  letter-spacing: normal;
+  text-transform: none;
+  white-space: nowrap;
+  direction: ltr;
+  font-feature-settings: "liga";
+  -webkit-font-smoothing: antialiased;
+  color: var(--tinta-fraca);
+  flex: none;
+}
+
+.eti-cartao {
+  display: flex;
+  flex-direction: column;
+  gap: 0.7rem;
+  background: #FFFFFF;
+  border: 1px solid var(--borda);
+  border-radius: 14px;
+  padding: 1rem 1.1rem;
+  transition: border-color 0.15s ease, box-shadow 0.15s ease, transform 0.15s ease;
+}
+.eti-cartao-escola {
+  gap: 0.55rem;
+}
+[class*="st-key-clic_"]:hover .eti-cartao {
+  border-color: #A9CDD2;
+  box-shadow: 0 6px 18px rgba(16, 42, 51, 0.08);
+  transform: translateY(-1px);
+}
+.eti-cartao-topo {
+  display: flex;
+  align-items: center;
+  gap: 0.75rem;
+}
+.eti-cartao-id {
+  min-width: 0;
+  flex: 1 1 auto;
+}
+.eti-cartao-titulo {
+  font-weight: 650;
+  font-size: 1rem;
+  line-height: 1.3;
+  color: var(--tinta);
+  overflow-wrap: anywhere;
+}
+.eti-2linhas,
+.eti-3linhas,
+.eti-cartao-pessoa .eti-cartao-titulo,
+.eti-cartao-linha span:last-child {
+  display: -webkit-box;
+  -webkit-line-clamp: 2;
+  -webkit-box-orient: vertical;
+  overflow: hidden;
+}
+.eti-3linhas {
+  -webkit-line-clamp: 3;
+}
+.eti-1linha span:last-child {
+  -webkit-line-clamp: 1;
+}
+
+/* Marca "Acompanhar" */
+.eti-bandeira {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.2rem;
+  padding: 0.22rem 0.62rem 0.22rem 0.45rem;
+  border-radius: 999px;
+  background: #FBEEE6;
+  color: #8A3A19;
+  font-size: 0.78rem;
+  font-weight: 600;
+  line-height: 1.3;
+  white-space: nowrap;
+}
+.eti-bandeira .eti-icone {
+  font-size: 0.9rem;
+  color: #A8461F;
+}
+
+/* Títulos das seções dentro das gavetas */
+[data-testid="stDialog"] [data-testid="stMarkdownContainer"] h4 {
+  font-size: 1.05rem;
+  font-weight: 700;
+  padding: 0.6rem 0 0.2rem 0;
+}
+.eti-cartao-sub {
+  font-size: 0.84rem;
+  color: var(--tinta-suave);
+  line-height: 1.35;
+}
+.eti-cartao-linhas {
+  display: flex;
+  flex-direction: column;
+  gap: 0.35rem;
+}
+.eti-cartao-linha {
+  display: flex;
+  align-items: flex-start;
+  gap: 0.45rem;
+  font-size: 0.84rem;
+  line-height: 1.35;
+  color: var(--tinta-suave);
+}
+.eti-cartao-linha .eti-icone {
+  font-size: 1rem;
+  margin-top: 0.05rem;
+}
+.eti-cartao-rodape {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 0.35rem 0.5rem;
+  margin-top: auto;
+}
+.eti-cartao-chamada {
+  display: flex;
+  align-items: center;
+  gap: 0.25rem;
+  font-size: 0.74rem;
+  font-weight: 650;
+  letter-spacing: 0.05em;
+  text-transform: uppercase;
+  color: var(--petroleo);
+}
+.eti-cartao-chamada .eti-icone {
+  font-size: 0.95rem;
+  color: var(--petroleo);
+}
+.eti-cartao-meio {
+  display: flex;
+  flex-direction: column;
+  gap: 0.35rem;
+  margin-top: 0.15rem;
+}
+.eti-cartao-contagem {
+  font-size: 0.8rem;
+  color: var(--tinta-suave);
+}
+.eti-cartao-resumo {
+  font-size: 0.84rem;
+  color: var(--tinta-suave);
+}
+.eti-cartao-resumo b {
+  color: var(--tinta);
+  font-weight: 650;
+}
+.eti-cartao-mini {
+  flex-direction: row;
+  align-items: center;
+  gap: 0.8rem;
+  padding: 0.85rem 1rem;
+}
+.eti-icone-g {
+  font-size: 1.7rem;
+  color: var(--petroleo);
+}
+.eti-seta {
+  font-size: 1.3rem;
+}
+
+/* Avatar com iniciais, na cor da situação de acesso */
+.eti-avatar {
+  flex: none;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 2.6rem;
+  height: 2.6rem;
+  border-radius: 50%;
+  font-weight: 700;
+  font-size: 0.92rem;
+  letter-spacing: 0.02em;
+}
+.eti-avatar-p {
+  width: 2.2rem;
+  height: 2.2rem;
+  font-size: 0.8rem;
+}
+.eti-avatar-g {
+  width: 3.8rem;
+  height: 3.8rem;
+  font-size: 1.3rem;
+}
+
+/* Etiquetas de situação */
+.eti-etiqueta {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.4rem;
+  padding: 0.22rem 0.62rem;
+  border-radius: 999px;
+  background: var(--fundo-2);
+  color: var(--tinta);
+  font-size: 0.78rem;
+  font-weight: 500;
+  line-height: 1.3;
+  white-space: nowrap;
+}
+.eti-etiqueta i {
+  display: inline-block;
+  flex: none;
+  width: 0.55rem;
+  height: 0.55rem;
+  border-radius: 50%;
+}
+.eti-etiqueta-alerta {
+  background: #FBEEE6;
+  color: #8A3A19;
+}
+
+/* Pontos (um por cursista) e barra de progresso dos cartões de escola */
+.eti-pontos {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 4px;
+}
+.eti-pontos i {
+  display: inline-block;
+  width: 0.72rem;
+  height: 0.72rem;
+  border-radius: 50%;
+}
+.eti-pontos span {
+  font-size: 0.75rem;
+  color: var(--tinta-suave);
+  margin-left: 2px;
+}
+.eti-legenda-pontos {
+  margin: 0.2rem 0 0.6rem 0;
+  font-size: 0.82rem;
+}
+.eti-legenda-pontos i {
+  width: 0.72rem;
+  height: 0.72rem;
+  border-radius: 50%;
+}
+.eti-progresso {
+  height: 6px;
+  border-radius: 999px;
+  background: #E6EEF0;
+  overflow: hidden;
+}
+.eti-progresso div {
+  height: 100%;
+  border-radius: 999px;
+  background: var(--petroleo);
+}
+
+/* Cartões de filtro */
+.eti-filtro {
+  display: flex;
+  flex-direction: column;
+  gap: 0.25rem;
+  background: #FFFFFF;
+  border: 1px solid var(--borda);
+  border-radius: 12px;
+  padding: 0.75rem 0.9rem 0.8rem 0.9rem;
+  transition: border-color 0.15s ease, background 0.15s ease;
+}
+[class*="st-key-clic_"]:hover .eti-filtro {
+  border-color: #A9CDD2;
+}
+[class*="st-key-clic_ativo_"] .eti-filtro {
+  border: 2px solid var(--petroleo);
+  background: #F1F7F8;
+  padding: calc(0.75rem - 1px) calc(0.9rem - 1px) calc(0.8rem - 1px) calc(0.9rem - 1px);
+}
+.eti-filtro-rotulo {
+  display: flex;
+  align-items: flex-start;
+  gap: 0.45rem;
+  min-height: 2.1rem;
+  font-size: 0.82rem;
+  line-height: 1.28;
+  color: var(--tinta-suave);
+}
+.eti-filtro-rotulo i {
+  flex: none;
+  width: 0.6rem;
+  height: 0.6rem;
+  margin-top: 0.3rem;
+  border-radius: 50%;
+}
+.eti-filtro-valor {
+  font-size: 1.55rem;
+  font-weight: 750;
+  letter-spacing: -0.02em;
+  line-height: 1.1;
+  color: var(--tinta);
+}
+.eti-filtro-barra {
+  height: 4px;
+  margin-top: 0.2rem;
+  border-radius: 999px;
+  background: #EEF1F3;
+  overflow: hidden;
+}
+.eti-filtro-barra div {
+  height: 100%;
+  border-radius: 999px;
+}
+
+/* Blocos de números das fichas */
+.eti-numeros {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(8.5rem, 1fr));
+  gap: 0.6rem;
+  margin: 0.4rem 0 1rem 0;
+}
+.eti-numero {
+  padding: 0.7rem 0.9rem;
+  border: 1px solid var(--borda);
+  border-radius: 12px;
+  background: #FFFFFF;
+}
+.eti-numero-rotulo {
+  font-size: 0.8rem;
+  line-height: 1.25;
+  color: var(--tinta-suave);
+}
+.eti-numero-valor {
+  margin-top: 0.15rem;
+  font-size: 1.4rem;
+  font-weight: 750;
+  letter-spacing: -0.02em;
+  color: var(--tinta);
+}
+.eti-numero-sub {
+  margin-top: 0.1rem;
+  font-size: 0.75rem;
+  color: var(--tinta-fraca);
+}
+
+/* Linha de pessoa na ficha da escola */
+.eti-linha-pessoa {
+  display: flex;
+  align-items: center;
+  gap: 0.75rem;
+  padding: 0.6rem 0.75rem;
+  border: 1px solid var(--borda);
+  border-radius: 12px;
+  background: #FFFFFF;
+  transition: border-color 0.15s ease, background 0.15s ease;
+}
+[class*="st-key-clic_"]:hover .eti-linha-pessoa {
+  border-color: #A9CDD2;
+  background: #F8FBFB;
+}
+.eti-linha-situacao {
+  display: flex;
+  flex-wrap: wrap;
+  justify-content: flex-end;
+  gap: 0.3rem;
+}
+
+/* Cabeçalho do perfil e etapas da participação (ficha do cursista) */
+.eti-perfil {
+  display: flex;
+  align-items: center;
+  gap: 1rem;
+  margin: 0.2rem 0 0.8rem 0;
+}
+.eti-perfil-sub {
+  margin-top: 0.2rem;
+  font-size: 0.95rem;
+  color: var(--tinta-suave);
+}
+[data-testid="stHtml"] ol.eti-jornada {
+  list-style: none;
+  margin: 0.5rem 0 0.4rem 0;
+  padding: 0;
+}
+.eti-passo {
+  position: relative;
+  display: flex;
+  gap: 0.85rem;
+  padding: 0 0 1rem 0;
+}
+.eti-passo:not(:last-child)::before {
+  content: "";
+  position: absolute;
+  left: calc(0.875rem - 1px);
+  top: 1.95rem;
+  bottom: 0.15rem;
+  width: 2px;
+  background: var(--borda);
+}
+.eti-passo-marca {
+  flex: none;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 1.75rem;
+  height: 1.75rem;
+  border-radius: 50%;
+}
+.eti-passo-marca .eti-icone {
+  font-size: 1.05rem;
+  color: inherit;
+}
+.eti-passo-ok .eti-passo-marca {
+  background: var(--petroleo);
+  color: #FFFFFF;
+}
+.eti-passo-atencao .eti-passo-marca {
+  background: #F6E3D6;
+  color: #8A3A19;
+}
+.eti-passo-pendente .eti-passo-marca {
+  border: 1px dashed #C5CBD3;
+  background: var(--fundo-2);
+  color: var(--tinta-fraca);
+}
+.eti-passo-titulo {
+  font-size: 0.95rem;
+  font-weight: 600;
+  line-height: 1.3;
+}
+.eti-passo-detalhe {
+  font-size: 0.86rem;
+  line-height: 1.4;
+  color: var(--tinta-suave);
+}
+.eti-aviso {
+  margin: 0.4rem 0 0.8rem 0;
+  padding: 0.8rem 1rem;
+  border: 1px solid #F0D5C4;
+  border-radius: 12px;
+  background: #FDF6F1;
+}
+.eti-aviso-titulo {
+  margin-bottom: 0.3rem;
+  font-weight: 650;
+  color: #8A3A19;
+}
+[data-testid="stHtml"] .eti-aviso ul {
+  margin: 0 0 0.35rem 0;
+  padding-left: 1.1rem;
+  font-size: 0.9rem;
+}
+.eti-aviso p {
+  margin: 0;
+  font-size: 0.8rem;
+  color: var(--tinta-suave);
+}
+
+/* Infraestrutura declarada ao Censo (ficha da escola) */
+[data-testid="stHtml"] ul.eti-infra {
+  list-style: none;
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(13.5rem, 1fr));
+  gap: 0.5rem;
+  margin: 0.3rem 0 1rem 0;
+  padding: 0;
+}
+[data-testid="stHtml"] .eti-infra li {
+  display: flex;
+  align-items: center;
+  gap: 0.55rem;
+  margin: 0;
+  padding: 0.55rem 0.75rem;
+  border-radius: 10px;
+  font-size: 0.86rem;
+  line-height: 1.25;
+}
+.eti-infra li span:not(.eti-icone) {
+  flex: 1 1 auto;
+}
+.eti-infra b {
+  font-size: 0.75rem;
+  font-weight: 650;
+}
+.eti-infra-sim {
+  background: #EAF3F4;
+  color: var(--tinta);
+}
+.eti-infra-sim .eti-icone,
+.eti-infra-sim b {
+  color: var(--petroleo);
+}
+.eti-infra-nao {
+  background: var(--fundo-2);
+  color: var(--tinta-suave);
+}
+.eti-infra-nao .eti-icone {
+  color: #A0AAB4;
+}
+.eti-infra-nao b,
+.eti-infra-na b {
+  color: var(--tinta-fraca);
+}
+.eti-infra-na {
+  border: 1px dashed var(--borda);
+  color: var(--tinta-fraca);
+}
+
+/* Telas de acesso */
+.eti-tela {
+  max-width: 34rem;
+  margin: 12vh auto 1.5rem auto;
+  text-align: center;
+}
+.eti-tela h1 {
+  font-size: 1.6rem;
+  margin: 0.4rem 0 0.75rem 0;
+}
+.eti-tela p {
+  color: var(--tinta-suave);
+}
+
+/* ---------------------------------------------------------------- telas estreitas */
+@media (max-width: 640px) {
+  [data-testid="stMainBlockContainer"] {
+    padding-left: 1rem;
+    padding-right: 1rem;
+  }
+  .eti-marca {
+    width: 160px;
+  }
+  .eti-ficha-titulo {
+    font-size: 1.35rem;
+  }
+  .eti-dl {
+    grid-template-columns: 1fr;
+    gap: 0.05rem;
+  }
+  .eti-dl dd {
+    margin-bottom: 0.45rem;
+  }
+}
