@@ -188,3 +188,36 @@ def test_painel_sem_banco_le_os_arquivos_da_pasta_sozinho(monkeypatch, tmp_path,
     import os
 
     assert (Path(os.environ["ETI_PASTA_PUBLICADA"]) / "eti.sqlite3").exists()
+
+
+def test_codigo_atualizado_no_servidor_e_recarregado(tmp_path):
+    """Como no servidor online depois de um commit: o app.py novo não pode rodar com módulos antigos em memória."""
+    import subprocess
+    import sys
+    import textwrap
+
+    from conftest import RAIZ
+
+    if not (RAIZ / "data" / "publicado" / "eti.sqlite3").exists():
+        pytest.skip("versão publicada não encontrada")
+    script = textwrap.dedent(f"""
+        import os, sys
+        os.environ["ETI_AMBIENTE"] = "publicacao"
+        os.environ["ETI_PASTA_PUBLICADA"] = {str(RAIZ / "data" / "publicado")!r}
+        sys.path.insert(0, {str(RAIZ)!r})
+        from streamlit.testing.v1 import AppTest
+        app = AppTest.from_file({APP!r}, default_timeout=240)
+        app.run()
+        assert not app.exception, "primeira abertura"
+        antigo = sys.modules["src.config"]
+        sys.modules["src"].CARREGADO_EM = 0  # arquivos mais novos que o código em memória
+        app.run()
+        assert not app.exception, "abertura depois da atualização"
+        assert sys.modules["src.config"] is not antigo, "o código não foi recarregado"
+        del sys.modules["src"].CARREGADO_EM  # código anterior a esta verificação (sem a marca)
+        app.run()
+        assert not app.exception, "abertura com código sem a marca de carregamento"
+        print("ok")
+    """)
+    saida = subprocess.run([sys.executable, "-c", script], capture_output=True, text=True, timeout=600, cwd=tmp_path)
+    confere(saida.returncode == 0 and saida.stdout.strip().endswith("ok"), "o painel não recarregou o código atualizado")

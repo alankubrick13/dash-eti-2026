@@ -374,7 +374,7 @@ assets/                     estilo.css, certificado intermediário do Inep, past
 static/fonts/               Inter (OFL)
 data/referencias/           lista oficial de municípios e malhas territoriais do IBGE (Região Norte)
 data/publicado/             versão publicada do banco (sem contatos), lida pelo painel online
-tests/                      108 testes com os dados reais (pytest + AppTest)
+tests/                      109 testes com os dados reais (pytest + AppTest)
 .streamlit/config.toml      tema, fontes, segurança de erros e uploads
 ```
 
@@ -400,7 +400,7 @@ reais (por exemplo, numa cópia do repositório), os testes que dependem deles s
 Privacidade na saída dos testes: as verificações sobre dados pessoais só informam contagens, e o pytest
 roda com `--assert=plain`; nenhum nome, e-mail ou CPF aparece na tela, nem em caso de falha.
 
-São 108 testes (107 aprovados e 1 ignorado: o da exportação do Catálogo de Escolas, que não foi
+São 109 testes (108 aprovados e 1 ignorado: o da exportação do Catálogo de Escolas, que não foi
 fornecida). Eles cobrem:
 
 - leitura das planilhas e do texto do Moodle (valores preservados como vieram, mesmo conteúdo em CSV,

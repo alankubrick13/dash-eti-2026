@@ -16,6 +16,31 @@ st.set_page_config(
     initial_sidebar_state="auto",
 )
 
+
+
+def _descartar_codigo_desatualizado() -> None:
+    """Recarrega os módulos de ``src`` quando os arquivos mudaram desde que foram carregados.
+
+    O Streamlit reexecuta este arquivo a cada interação, mas não recarrega todos os módulos já importados:
+    depois de uma atualização (por exemplo, um commit novo no servidor online), o app.py novo poderia rodar
+    com módulos antigos em memória.
+    """
+    import sys
+    from pathlib import Path
+
+    pacote = sys.modules.get("src")
+    if pacote is None:
+        return
+    carregado = getattr(pacote, "CARREGADO_EM", None)  # ausente: código anterior a esta verificação
+    pasta_src = Path(__file__).resolve().parent / "src"
+    if carregado is not None and all(p.stat().st_mtime <= carregado for p in pasta_src.glob("*.py")):
+        return
+    for nome in [n for n in sys.modules if n == "src" or n.startswith("src.")]:
+        del sys.modules[nome]
+
+
+_descartar_codigo_desatualizado()
+
 from src import ambiente, config, fichas, painel, pasta, publicacao, security, ui  # noqa: E402
 
 PAGINAS = (
