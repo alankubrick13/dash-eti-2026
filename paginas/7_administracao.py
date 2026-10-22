@@ -22,6 +22,20 @@ ui.titulo_pagina(
     "depois de confirmada; se a gravação falhar, a versão anterior continua valendo. Os arquivos originais "
     "nunca são alterados.",
 )
+with st.container(border=True):
+    st.markdown("**Os dados do painel são os arquivos da pasta**")
+    ui.nota(f"Pasta: {ctx.cfg.pasta_arquivos}. Ao abrir, o painel lê sozinho as planilhas do cadastro e a "
+            "exportação de participantes da plataforma que estiverem nela; para atualizar, substitua ou acrescente "
+            "os arquivos na pasta e recarregue a página. Os envios abaixo servem para arquivos que estão em outro lugar.")
+    em_uso = []
+    for fonte, rotulo in (("cadastro", "Cadastro"), ("atividade", "Atividade na plataforma")):
+        ativa = ctx.repo.importacao_ativa(fonte)
+        arquivos = ", ".join(a.get("arquivo", "") for a in (ativa or {}).get("arquivos", [])) or "nenhum arquivo"
+        em_uso.append((rotulo, arquivos))
+    escolas_meta = ctx.base.meta.get("escolas")
+    em_uso.append(("Base escolar", escolas_meta.get("referencia_descricao") if escolas_meta else "não carregada"))
+    ui.lista_definicoes(em_uso)
+
 ROTULOS_CADASTRO = {c.nome: c.rotulo for c in CAMPOS_CADASTRO}
 ROTULOS_ATIVIDADE = {c.nome: c.rotulo for c in CAMPOS_ATIVIDADE}
 

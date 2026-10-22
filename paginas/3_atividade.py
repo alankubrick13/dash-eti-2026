@@ -17,7 +17,7 @@ ui.titulo_pagina(
 )
 ui.recorte(ctx)
 if not base.tem_atividade:
-    ui.vazio("A base de atividade ainda não foi importada.")
+    ui.faltam_arquivos(ctx.cfg, "atividade")
     st.stop()
 
 meta = base.meta["atividade"]

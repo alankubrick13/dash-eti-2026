@@ -65,3 +65,8 @@ htmlcov/
 
 # Logo original enviada pela coordenação (o app usa a cópia em assets/marca/)
 /images.png
+
+# Versão publicada do painel (sem contatos nem dados sensíveis; gerada por scripts/publicar.py)
+!data/publicado/
+!data/publicado/eti.sqlite3
+!data/publicado/publicacao.json

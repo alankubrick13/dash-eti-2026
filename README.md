@@ -52,6 +52,7 @@ O modo é definido pela variável `ETI_AMBIENTE`, que pode estar no ambiente, nu
 | Modo | Para quê | Dados | Login |
 |---|---|---|---|
 | `local` (padrão) | Uso num computador confiável | Reais, em `data/privado/` (fora do git) | Não exige: o painel abre direto |
+| `publicacao` | Painel online, para quem precisa ver os dados | Reais: a versão publicada, em `data/publicado/` | Não exige; só leitura |
 | `producao` | Servidor institucional | Reais | **OIDC obrigatório** + lista de e-mails autorizados |
 
 ```bash
@@ -68,15 +69,57 @@ O cabeçalho traz o selo "Dados reais". Enquanto uma base não é importada, as 
 falta; nunca a preenchem com dados de exemplo. `ETI_AMBIENTE=demonstracao` é recusado com uma mensagem:
 esse modo foi removido.
 
-**Sem login, o painel mostra tudo a quem abrir o endereço dele.** O atalho `./abrir_painel.sh` liga o
-servidor só neste computador (`localhost`). Não publique o painel com dados reais na internet (por
-exemplo, no Streamlit Community Cloud) enquanto não houver autenticação configurada; veja a
-[seção 12](#12-o-que-falta-para-um-ambiente-institucional-de-produção).
+**Sem login, o painel local mostra tudo a quem abrir o endereço dele**, inclusive contatos e a
+Administração. Por isso o atalho `./abrir_painel.sh` liga o servidor só neste computador (`localhost`).
+Para outras pessoas, use o painel online (abaixo), que é só de leitura e não tem contatos.
+
+### Painel online (versão publicada)
+
+O painel online mostra os mesmos dados e os mesmos números do painel local, a partir de
+`data/publicado/eti.sqlite3`, que vai para o GitHub. Ele abre direto, só para leitura: não tem a página
+Administração, não exibe contatos e não registra decisões de conciliação.
+
+A versão publicada é gerada a partir do banco local e **não contém**:
+
+- CPF e data de nascimento (que nem o banco local guarda);
+- e-mails, trocados por códigos irreversíveis, iguais no cadastro e na plataforma, para que a
+  conciliação dê o mesmo resultado; a chave desses códigos fica só neste computador;
+- telefone, WhatsApp, raça/cor e gênero;
+- o registro de auditoria, as observações e os autores das decisões de conciliação.
+
+Antes de gravar, o gerador confere que nenhum e-mail ou telefone do banco local passou para a cópia; se
+passar, nada é publicado.
+
+Para atualizar o painel online:
+
+1. Troque ou acrescente os arquivos na pasta e abra o painel local: ele lê os arquivos e já gera a nova
+   versão publicada (ou rode `.venv/bin/python scripts/publicar.py`).
+2. Envie `data/publicado/` ao GitHub (`git add data/publicado`, `git commit`, `git push`).
+
+Sem configuração, o painel escolhe o modo sozinho: onde só existe a versão publicada (o servidor
+online), abre em `publicacao`; onde há banco local ou arquivos de dados na pasta, em `local`.
+
+**Quem pode ver.** O painel online não tem login. Na hospedagem (por exemplo, no Streamlit Community
+Cloud), é possível restringir quem abre o endereço nas configurações de compartilhamento do aplicativo.
 
 ## 3. Como importar as planilhas
 
-A importação é feita na página **Administração**, que só aparece para administradores. Em uso local sem
-login, o usuário local é administrador. Cada fonte segue o mesmo fluxo:
+**Os dados do painel são os arquivos da pasta.** Coloque na pasta do painel (a pasta do projeto; outra
+pode ser indicada em `ETI_PASTA_ARQUIVOS`):
+
+- as planilhas do cadastro (.xlsx ou .csv com as colunas do modelo; a principal e a lista de novos
+  inscritos formam juntas o cadastro);
+- a exportação de participantes da plataforma: o texto copiado da página "Participantes" do Moodle (.txt)
+  ou a planilha exportada.
+
+Ao abrir, o painel reconhece cada arquivo pelo conteúdo e confere a soma SHA-256 de cada um. Se algum
+arquivo entrou, saiu ou mudou, ele importa a nova versão sozinho, com a mesma validação descrita abaixo,
+e avisa no canto da tela. Os arquivos originais nunca são alterados. A base escolar vem do pacote oficial
+do Inep: se ele já estiver no cache (`data/privado/cache_inep/`), é lido sozinho; senão, baixe-o na
+Administração (seção 4).
+
+A página **Administração** mostra quais arquivos estão em uso e também aceita o envio de arquivos que
+estejam em outro lugar. Em uso local sem login, o usuário local é administrador. O envio segue o fluxo:
 
 1. **Enviar** o(s) arquivo(s). Nada é gravado nesta etapa.
 2. **Validar arquivos.** O painel mostra:
@@ -319,23 +362,26 @@ src/
   metrics.py                indicadores documentados
   persistence.py            SQLite com troca transacional, decisões, parâmetros, auditoria
   security.py               pseudonimização, mascaramento, logs, autenticação
-  ambiente.py               repositório de dados (banco SQLite em data/privado)
+  ambiente.py               repositório de dados (banco SQLite em data/privado ou cópia da versão publicada)
+  pasta.py                  leitura automática dos arquivos de dados colocados na pasta
+  publicacao.py             geração e conferência da versão publicada
   mapas.py                  mapa dos municípios (malhas do IBGE) e agregação por município
   cartoes.py                cartões das galerias e peças visuais das fichas
   fichas.py                 fichas da escola e do cursista (gavetas laterais)
   graficos.py, ui.py        gráficos e componentes de interface
-scripts/                    importar.py (importação pela linha de comando)
+scripts/                    importar.py (importação pela linha de comando), publicar.py (versão publicada)
 assets/                     estilo.css, certificado intermediário do Inep, pasta para a marca
 static/fonts/               Inter (OFL)
 data/referencias/           lista oficial de municípios e malhas territoriais do IBGE (Região Norte)
-tests/                      99 testes com os dados reais (pytest + AppTest)
+data/publicado/             versão publicada do banco (sem contatos), lida pelo painel online
+tests/                      108 testes com os dados reais (pytest + AppTest)
 .streamlit/config.toml      tema, fontes, segurança de erros e uploads
 ```
 
 ## 10. Testes e desempenho
 
 ```bash
-.venv/bin/python -m pytest                 # todos os testes (cerca de 1 min e meio)
+.venv/bin/python -m pytest                 # todos os testes (cerca de 2 minutos)
 .venv/bin/python -m pytest -m "not lento"  # sem os que leem o pacote do Inep
 ```
 
@@ -354,7 +400,7 @@ reais (por exemplo, numa cópia do repositório), os testes que dependem deles s
 Privacidade na saída dos testes: as verificações sobre dados pessoais só informam contagens, e o pytest
 roda com `--assert=plain`; nenhum nome, e-mail ou CPF aparece na tela, nem em caso de falha.
 
-São 99 testes (98 aprovados e 1 ignorado: o da exportação do Catálogo de Escolas, que não foi
+São 108 testes (107 aprovados e 1 ignorado: o da exportação do Catálogo de Escolas, que não foi
 fornecida). Eles cobrem:
 
 - leitura das planilhas e do texto do Moodle (valores preservados como vieram, mesmo conteúdo em CSV,
@@ -367,7 +413,10 @@ fornecida). Eles cobrem:
 - base escolar com o pacote oficial do Inep (MD5, etapas derivadas das matrículas, enriquecimento);
 - indicadores, faixas de acesso, filtros e mapas;
 - cartões de todas as pessoas e escolas reais, sem nenhum contato dentro deles;
-- as sete páginas abertas sobre a cópia do banco, as galerias, as gavetas e a navegação entre elas.
+- as sete páginas abertas sobre a cópia do banco, as galerias, as gavetas e a navegação entre elas;
+- leitura automática dos arquivos da pasta (inclusive num painel sem banco);
+- versão publicada: sem contatos nem dados sensíveis, com os mesmos números do painel local, e o painel
+  online só de leitura.
 
 Desempenho com os arquivos reais:
 

@@ -7,6 +7,7 @@ padrões definidos aqui. Nenhum segredo tem valor padrão no código.
 from __future__ import annotations
 
 import os
+import tempfile
 from dataclasses import dataclass
 from pathlib import Path
 
@@ -19,7 +20,11 @@ ARQ_CSS = DIR_ASSETS / "estilo.css"
 DIR_MARCA = DIR_ASSETS / "marca"
 
 # O painel trabalha só com dados reais: os fornecidos pela coordenação e os de fontes oficiais (Inep, IBGE).
-AMBIENTES = ("local", "producao")
+# local: este computador, com tudo; publicacao: leitura da versão publicada (data/publicado), para quem abre o
+# painel online; producao: servidor institucional com login.
+AMBIENTES = ("local", "publicacao", "producao")
+DIR_PUBLICADO = RAIZ / "data" / "publicado"
+EXTENSOES_DADOS = (".xlsx", ".csv", ".txt")
 
 NOME_PROGRAMA = "Programa Escola em Tempo Integral"
 NOME_FERRAMENTA = "Painel de acompanhamento da formação"
@@ -91,6 +96,8 @@ PARAMETROS_PADRAO: dict = {
 class Configuracao:
     ambiente: str
     dir_dados: Path
+    pasta_arquivos: Path  # onde a coordenação coloca as planilhas e a exportação da plataforma
+    pasta_publicada: Path  # versão publicada do banco (data/publicado), lida no modo publicacao
     usuarios_autorizados: frozenset[str]
     administradores: frozenset[str]
     acesso_contatos: frozenset[str]
@@ -148,9 +155,27 @@ def _verdadeiro(valor: str | None) -> bool:
     return str(valor or "").strip().lower() in {"1", "true", "sim", "yes"}
 
 
+def _ambiente_padrao(dir_dados: Path, pasta_arquivos: Path, pasta_publicada: Path) -> str:
+    """Sem ETI_AMBIENTE: "publicacao" onde só existe a versão publicada (o painel online); senão, "local"."""
+    if (dir_dados / "eti.sqlite3").exists() or not (pasta_publicada / "eti.sqlite3").exists():
+        return "local"
+    arquivos = pasta_arquivos.iterdir() if pasta_arquivos.is_dir() else []
+    if any(p.is_file() and p.suffix.lower() in EXTENSOES_DADOS and not p.name.startswith("requirements")
+           for p in arquivos):
+        return "local"
+    return "publicacao"
+
+
 def carregar_configuracao() -> Configuracao:
     _carregar_dotenv(RAIZ / ".env")
-    ambiente = (ler_opcao("ETI_AMBIENTE", "local") or "local").lower()
+    dir_dados = Path(ler_opcao("ETI_DIRETORIO_DADOS", str(RAIZ / "data" / "privado")))
+    if not dir_dados.is_absolute():
+        dir_dados = RAIZ / dir_dados
+    pasta_arquivos = Path(ler_opcao("ETI_PASTA_ARQUIVOS", str(RAIZ)))
+    if not pasta_arquivos.is_absolute():
+        pasta_arquivos = RAIZ / pasta_arquivos
+    pasta_publicada = Path(ler_opcao("ETI_PASTA_PUBLICADA", str(DIR_PUBLICADO)))
+    ambiente = (ler_opcao("ETI_AMBIENTE") or _ambiente_padrao(dir_dados, pasta_arquivos, pasta_publicada)).lower()
     if ambiente == "demonstracao":
         raise ValueError("O modo demonstração foi removido: o painel trabalha só com dados reais. "
                          "Use ETI_AMBIENTE=local (este computador) ou producao (servidor institucional).")
@@ -158,9 +183,8 @@ def carregar_configuracao() -> Configuracao:
         raise ValueError(
             f"ETI_AMBIENTE inválido: use um de {', '.join(AMBIENTES)}."
         )
-    dir_dados = Path(ler_opcao("ETI_DIRETORIO_DADOS", str(RAIZ / "data" / "privado")))
-    if not dir_dados.is_absolute():
-        dir_dados = RAIZ / dir_dados
+    if ambiente == "publicacao":
+        dir_dados = Path(tempfile.gettempdir()) / "painel_eti_publicado"  # cópia de trabalho da versão publicada
     administradores = _lista_emails(ler_opcao("ETI_ADMINISTRADORES"))
     contatos = _lista_emails(ler_opcao("ETI_ACESSO_CONTATOS")) or administradores
     try:
@@ -170,6 +194,8 @@ def carregar_configuracao() -> Configuracao:
     return Configuracao(
         ambiente=ambiente,
         dir_dados=dir_dados,
+        pasta_arquivos=pasta_arquivos,
+        pasta_publicada=pasta_publicada,
         usuarios_autorizados=_lista_emails(ler_opcao("ETI_USUARIOS_AUTORIZADOS")) | administradores,
         administradores=administradores,
         acesso_contatos=contatos,

@@ -15,7 +15,7 @@ ui.titulo_pagina(
 )
 ui.recorte(ctx)
 if not base.tem_cadastro:
-    ui.vazio("O cadastro de cursistas ainda não foi importado.")
+    ui.faltam_arquivos(ctx.cfg, "cadastro")
     st.stop()
 
 pessoas = painel.pessoas_de(ctx.cursistas)

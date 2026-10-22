@@ -182,7 +182,7 @@ def _indisponivel(indicador_id: str, motivo: str) -> Resultado:
 def calcular(cursistas: pd.DataFrame, contas: pd.DataFrame, base, parametros: dict) -> dict[str, Resultado]:
     r: dict[str, Resultado] = {}
     if cursistas.empty:
-        motivo = "Nenhum registro no recorte." if base.tem_cadastro else "Cadastro ainda não importado."
+        motivo = "Nenhum registro no recorte." if base.tem_cadastro else "Planilha do cadastro não encontrada na pasta."
         return {i: _indisponivel(i, motivo) for i in INDICADORES}
     pessoas = pessoas_de(cursistas)
     n_pessoas = len(pessoas)
@@ -211,7 +211,7 @@ def calcular(cursistas: pd.DataFrame, contas: pd.DataFrame, base, parametros: di
     if not base.tem_atividade:
         for i in ("pct_contas_encontradas", "pct_contas_ativas", "pct_acesso_recente", "pessoas_acompanhamento",
                   "registros_pendentes", "contas_cursista", "contas_sem_cadastro"):
-            r[i] = _indisponivel(i, "Base de atividade ainda não importada.")
+            r[i] = _indisponivel(i, "Exportação da plataforma não encontrada na pasta.")
         return r
 
     com_conta = pessoas[pessoas["status_conciliacao"] == rc.CORRESPONDENTE]
@@ -322,7 +322,7 @@ def calcular_escolas(escolas: pd.DataFrame, atributos: pd.DataFrame, tem_ativida
                                                 contexto=f"de {numero(len(dados))} escolas localizadas na base oficial")
     if not tem_atividade:
         r["escolas_sem_acesso"] = Resultado(i["escolas_sem_acesso"], None, disponivel=False,
-                                            motivo="Base de atividade ainda não importada.")
+                                            motivo="Exportação da plataforma não encontrada na pasta.")
     else:
         avaliaveis = escolas[escolas["com_conta"] > 0]
         nenhum = int((avaliaveis["acessaram"] == 0).sum())

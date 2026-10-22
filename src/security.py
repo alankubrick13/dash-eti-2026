@@ -130,7 +130,7 @@ class Usuario:
     nome: str
     administrador: bool
     acesso_contatos: bool
-    metodo: str  # oidc | local
+    metodo: str  # oidc | local | publicacao
 
 
 def oidc_configurado() -> bool:
@@ -194,6 +194,9 @@ def resolver_usuario(cfg) -> Usuario:
         # Uso local: o painel abre direto, sem tela de login ou de configuração
         nome = getpass.getuser()
         return Usuario(f"local:{nome}", nome, True, True, "local")
+    if cfg.ambiente == "publicacao":
+        # Painel online: abre direto, só para leitura (sem Administração, contatos ou decisões)
+        return Usuario("publicacao", "Visitante", False, False, "publicacao")
 
     ui.tela_configuracao_pendente(
         "Nenhum método de autenticação está configurado. Em produção, configure o provedor "

@@ -16,7 +16,7 @@ st.set_page_config(
     initial_sidebar_state="auto",
 )
 
-from src import ambiente, config, fichas, painel, security, ui  # noqa: E402
+from src import ambiente, config, fichas, painel, pasta, publicacao, security, ui  # noqa: E402
 
 PAGINAS = (
     ("Acompanhamento", "paginas/1_visao_geral.py", "Visão geral", "visao-geral", False),
@@ -84,6 +84,13 @@ def main() -> None:
     except (RuntimeError, ValueError) as exc:
         ui.tela_configuracao_pendente(str(exc))
         st.stop()
+    # Os dados são os arquivos colocados na pasta (no painel online, a versão publicada já traz tudo)
+    leitura = pasta.sincronizar(repo, pseudo, cfg) if cfg.ambiente == "local" else pasta.Resultado()
+    if leitura.importadas:  # arquivos novos na pasta: a versão publicada acompanha (falta só enviá-la)
+        try:
+            publicacao.gerar(cfg.dir_dados / "eti.sqlite3", security.obter_chave_pseudonimizacao(cfg), cfg.pasta_publicada)
+        except Exception:
+            logger.exception("falha ao gerar a versão publicada")
     base = painel.carregar_base(repo)
     filtros = barra_lateral(base, cfg, usuario)
     cursistas, contas = painel.aplicar_filtros(base, filtros)
@@ -98,6 +105,11 @@ def main() -> None:
         )
     navegacao = st.navigation(secoes, position="sidebar")
     ui.cabecalho(cfg, base)
+    if leitura.importadas:
+        st.toast("Dados atualizados a partir dos arquivos da pasta: " + "; ".join(leitura.importadas) + ".",
+                 icon=":material/sync:")
+    for problema in leitura.problemas:
+        st.error(problema, icon=":material/error:")
     try:
         fichas.abrir_pendente()  # ficha de escola ou de cursista pedida por um clique (gaveta lateral)
         navegacao.run()

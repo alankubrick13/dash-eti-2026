@@ -41,7 +41,7 @@ def referencias_dados(base, fuso: str) -> list[tuple[str, str]]:
         else:
             texto = f"importada em {_data_local(atv['importado_em'], fuso, False)} (data de exportação não informada)"
     else:
-        texto = "não importada"
+        texto = "não encontrada na pasta"
     itens.append(("Atividade", texto))
     itens.append(("Escolas", f"Censo Escolar {esc['referencia_em']}" if esc and esc.get("referencia_em") else
                   "base oficial não carregada"))
@@ -107,9 +107,15 @@ def cabecalho(cfg, base) -> None:
     marca_html = f'<div class="eti-marca-bloco">{marca}</div>' if marca else ""
     programa = "" if marca else f'<div class="eti-programa">{html.escape(config.NOME_PROGRAMA)}</div>'
     territorio = recorte_territorial(base)
-    modo = ('<div class="eti-modo"><span class="eti-icone" aria-hidden="true">verified_user</span>'
-            + ("Dados reais · uso local neste computador" if cfg.ambiente == "local" else "Dados reais · acesso autenticado")
-            + "</div>")
+    if cfg.ambiente == "publicacao":
+        from .publicacao import data_publicacao
+
+        publicado = _data_local(data_publicacao(cfg.pasta_publicada), cfg.fuso_horario)
+        selo = f"Dados reais · versão publicada em {publicado}" if publicado else "Dados reais · versão publicada"
+    else:
+        selo = "Dados reais · uso local neste computador" if cfg.ambiente == "local" else "Dados reais · acesso autenticado"
+    modo = (f'<div class="eti-modo"><span class="eti-icone" aria-hidden="true">verified_user</span>{html.escape(selo)}'
+            "</div>")
     st.html(
         f'<header class="eti-cabecalho">{marca_html}<div class="eti-identidade">{programa}'
         f'<div class="eti-ferramenta">{html.escape(config.NOME_FERRAMENTA)}</div>'
@@ -321,6 +327,17 @@ def exportacao_controlada(ctx, df: pd.DataFrame, rotulos: dict[str, str], nome_a
 
     st.download_button(rotulo_botao, conteudo, file_name=nome_arquivo, mime="text/csv", on_click=registrar,
                        key=f"exportar_{nome_arquivo}")
+
+
+def faltam_arquivos(cfg, fonte: str) -> None:
+    """A base ainda não está no painel: diz qual arquivo colocar na pasta (lida automaticamente)."""
+    if fonte == "cadastro":
+        texto = ("Nenhuma planilha do cadastro foi encontrada na pasta do painel. Coloque nela o arquivo do "
+                 "cadastro (.xlsx ou .csv, com as colunas do modelo) e recarregue a página: ele é lido sozinho.")
+    else:
+        texto = ("A exportação de participantes da plataforma não foi encontrada na pasta do painel. Coloque nela o "
+                 "texto copiado da página Participantes do Moodle (.txt) ou a planilha exportada e recarregue a página.")
+    vazio(f"{texto} Pasta: {cfg.pasta_arquivos}")
 
 
 def vazio(mensagem: str) -> None:

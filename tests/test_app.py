@@ -170,3 +170,17 @@ def test_municipio_do_mapa_leva_as_escolas(app):
     escola.click().run()
     assert not _erros(app)
     assert app.session_state[fichas.ABERTA][0] == "escola" and "Quem desta escola participa da formação" in _textos(app)
+
+
+def test_painel_sem_banco_le_os_arquivos_da_pasta_sozinho(monkeypatch, tmp_path, arquivos_cadastro, arquivo_atividade):
+    """O caso de um painel recém-aberto: nenhum banco ainda, só os arquivos reais na pasta do projeto."""
+    monkeypatch.setenv("ETI_AMBIENTE", "local")
+    monkeypatch.setenv("ETI_DIRETORIO_DADOS", str(tmp_path / "sem_banco"))
+    monkeypatch.delenv("ETI_PASTA_ARQUIVOS", raising=False)
+    teste = AppTest.from_file(APP, default_timeout=240)
+    teste.run()
+    confere(not _erros(teste), "erro ao abrir o painel sem banco")
+    teste.switch_page("paginas/2_cursistas.py").run()
+    textos = " ".join(h.proto.body for h in teste.get("html"))
+    confere("Nenhuma planilha do cadastro" not in textos, "o painel não leu as planilhas da pasta")
+    confere(len(_cartoes(teste)) == 24, "a galeria não mostrou os cursistas lidos da pasta")

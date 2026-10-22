@@ -20,7 +20,7 @@ ui.titulo_pagina(
 )
 ui.recorte(ctx)
 if not base.tem_cadastro and not base.tem_atividade:
-    ui.vazio("Nenhuma base foi importada ainda.")
+    ui.faltam_arquivos(ctx.cfg, "cadastro")
     st.stop()
 
 ids_recorte = set(ctx.cursistas["id_registro"])

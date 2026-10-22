@@ -18,7 +18,7 @@ ui.titulo_pagina(
 ui.recorte(ctx)
 
 if not base.tem_cadastro:
-    ui.vazio("O cadastro de cursistas ainda não foi importado. Um administrador pode importá-lo na página Administração.")
+    ui.faltam_arquivos(ctx.cfg, "cadastro")
     st.stop()
 
 r = metrics.calcular(ctx.cursistas, ctx.contas, base, base.parametros)
@@ -43,7 +43,7 @@ if pendentes.disponivel and pendentes.valor:
         acao.page_link("paginas/6_qualidade_conciliacao.py", label="Revisar conciliação")
 
 if not base.tem_atividade:
-    ui.vazio("Os gráficos de acesso aparecem depois da importação da base de atividade.")
+    ui.faltam_arquivos(ctx.cfg, "atividade")
     st.stop()
 
 limites = base.parametros["faixas_inatividade_dias"]

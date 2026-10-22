@@ -210,7 +210,7 @@ def _passos(c, base, fuso: str) -> list[tuple[str, str, str]]:
     passos = [("ok" if situacao == "Aceitou" else "atencao", "Inscrição",
                f"{situacao}" + (f" · resposta em {resposta}" if resposta else ""))]
     if not base.tem_atividade:
-        return passos + [("pendente", "Plataforma de formação", "Base de atividade ainda não importada")]
+        return passos + [("pendente", "Plataforma de formação", "Exportação da plataforma não encontrada na pasta")]
     status = c["status_conciliacao"]
     if status == rc.CORRESPONDENTE:
         conta = f"Conta encontrada ({str(c['regra_conciliacao']).lower()})" if not eh_vazio(c["regra_conciliacao"]) else "Conta encontrada"
@@ -327,6 +327,9 @@ def conteudo_cursista(ctx, id_registro: str, origem: tuple[str, str] | None = No
                 f"{d.decisao} em {_data(d.decidido_em, fuso)} por {d.decidido_por}" for d in decisoes.itertuples()) or "Nenhuma"),
         ])
     with st.expander("Dados pessoais e de contato"):
+        if ctx.cfg.ambiente == "publicacao":
+            ui.nota("Os dados de contato não fazem parte da versão publicada do painel.")
+            return
         if not ctx.usuario.acesso_contatos:
             ui.nota("Restritos a usuários com autorização para contato. Solicite à coordenação geral, se necessário.")
             return
