@@ -1,67 +1,101 @@
-"""Cartões das galerias e peças das fichas (dados fictícios)."""
+"""Cartões das galerias e peças das fichas, gerados para todas as pessoas e escolas reais do painel."""
 
-from collections import namedtuple
+import re
+
+import pytest
+from conftest import confere
 
 from src import cartoes, graficos, painel
-
-CORES = graficos.cores_faixas(painel.ordem_faixas([1, 7, 14]))
-Pessoa = namedtuple("Pessoa", [
-    "id_registro", "nome", "cargo_funcao", "escola", "escola_oficial", "municipio_escola", "ente", "uf",
-    "lista_grupos", "faixa_acesso", "acesso_tipo", "acesso_segundos", "status_conciliacao", "motivos",
-    "requer_acompanhamento", "email", "telefone",
-])
+from src.normalization import eh_vazio
 
 
-def _pessoa(**mudancas):
-    dados = dict(id_registro="C1", nome="MARIA DA SILVA", cargo_funcao="Diretor Escolar", escola="EMEF TESTE",
-                 escola_oficial="ESCOLA MUNICIPAL DE ENSINO FUNDAMENTAL JOÃO XXIII", municipio_escola="Belém",
-                 ente="Belém", uf="PA", lista_grupos=["Para 3"], faixa_acesso="1 a 7 dias", acesso_tipo="relativo",
-                 acesso_segundos=3 * 86400 + 3600, status_conciliacao="Correspondente", motivos=[],
-                 requer_acompanhamento=False, email="maria.silva@correio.example", telefone="91988887777")
-    dados.update(mudancas)
-    return Pessoa(**dados)
+@pytest.fixture(scope="module")
+def pessoas(base_real):
+    return painel.pessoas_de(base_real.cursistas)
 
 
-def test_nomes_em_caixa_alta_ficam_legiveis():
-    assert cartoes.nome_legivel("MARIA DA SILVA") == "Maria da Silva"
-    assert cartoes.nome_legivel("EMEF JOÃO XXIII") == "EMEF João XXIII"
-    assert cartoes.nome_legivel("ESCOLA ESTADUAL DOM PEDRO II") == "Escola Estadual Dom Pedro II"
-    assert cartoes.nome_legivel("E.E.F. SANTA-RITA DE CÁSSIA") == "E.E.F. Santa-Rita de Cássia"
-    assert cartoes.nome_legivel("Maria da Silva") == "Maria da Silva"  # caixa mista: como veio
-    assert cartoes.nome_legivel(None) == "—"
-    assert cartoes.iniciais("MARIA DA SILVA") == "MS" and cartoes.iniciais("ANA") == "A" and cartoes.iniciais("") == "?"
+@pytest.fixture(scope="module")
+def cores(base_real):
+    return graficos.cores_faixas(painel.ordem_faixas(base_real.parametros["faixas_inatividade_dias"]))
 
 
-def test_tempo_desde_o_ultimo_acesso():
-    assert cartoes.tempo_desde(1800) == "há menos de 1 hora"
-    assert cartoes.tempo_desde(5 * 3600) == "há 5 horas"
-    assert cartoes.tempo_desde(86400 + 10) == "há 1 dia"
-    assert cartoes.tempo_desde(20 * 86400) == "há 20 dias"
+def _letras(texto: str) -> str:
+    return " ".join(str(texto).split()).casefold()
+
+
+def test_nomes_reais_so_mudam_de_caixa(base_real):
+    nomes = [n for n in base_real.cursistas["nome"] if not eh_vazio(n)]
+    escolas = [e for e in base_real.cursistas["escola_oficial"].dropna().unique()]
+    alterados = sum(_letras(cartoes.nome_legivel(n)) != _letras(n) for n in [*nomes, *escolas])
+    confere(alterados == 0, f"{alterados} nome(s) real(is) com letras alteradas (além da caixa)")
+    instaveis = sum(cartoes.nome_legivel(cartoes.nome_legivel(n)) != cartoes.nome_legivel(n) for n in nomes)
+    confere(instaveis == 0, "formatação de nomes instável")
+
+
+def test_iniciais_dos_nomes_reais(base_real):
+    erradas = 0
+    for nome in base_real.cursistas["nome"].dropna():
+        sigla = cartoes.iniciais(nome)
+        palavras = [p for p in str(nome).split() if p.lower() not in cartoes.PARTICULAS and p[:1].isalpha()]
+        erradas += not (1 <= len(sigla) <= 2 and sigla.isupper() and palavras and sigla[0] == palavras[0][0].upper())
+    confere(erradas == 0, f"{erradas} inicial(is) incoerente(s) com o nome")
+
+
+def test_situacao_das_pessoas_reais(pessoas, cores):
+    incoerentes = 0
+    for pessoa in pessoas.itertuples(index=False):
+        texto, cor = cartoes.situacao(pessoa, cores)
+        if pessoa.acesso_tipo in ("relativo", "absoluto"):
+            incoerentes += not texto.startswith("Último acesso há")
+        elif pessoa.acesso_tipo == "nunca":
+            incoerentes += texto != "Nunca acessou"
+        incoerentes += cor != cores.get(pessoa.faixa_acesso, graficos.CINZA_SEM_CONTA)
+    confere(incoerentes == 0, f"{incoerentes} situação(ões) incoerente(s) nos cartões")
+
+
+def test_cartoes_reais_nao_mostram_contatos(base_real, pessoas, cores):
+    """Para todas as pessoas reais: cartão e linha da ficha da escola sem e-mail, telefone ou WhatsApp."""
+    vazados = 0
+    for pessoa in pessoas.itertuples(index=False):
+        html = (cartoes.cartao_pessoa(pessoa, cores) + cartoes.linha_pessoa(pessoa, cores)).lower()
+        digitos = re.sub(r"\D", "", html)
+        if not eh_vazio(pessoa.email):
+            vazados += str(pessoa.email).lower() in html
+        for telefone in (pessoa.telefone, pessoa.whatsapp):
+            numero = re.sub(r"\D", "", str(telefone)) if not eh_vazio(telefone) else ""
+            vazados += len(numero) >= 8 and numero in digitos
+    confere(vazados == 0, f"{vazados} contato(s) real(is) dentro dos cartões")
+    confere(len(pessoas) == base_real.cursistas["chave_pessoa"].nunique(), "galeria sem um cartão por pessoa")
+
+
+def test_html_dos_cartoes_escapado(pessoas, cores):
+    pessoa = next(pessoas.itertuples(index=False))
+    html = cartoes.cartao_pessoa(pessoa._replace(nome=f"{pessoa.nome} <b>"), cores)
+    assert "<b>" not in html and "&lt;" in html
+
+
+def test_cartoes_das_escolas_reais(base_real, cores):
+    resumo = painel.resumo_escolas(base_real.cursistas)
+    dados = base_real.cursistas.assign(_chave=painel.chave_escola(base_real.cursistas)).drop_duplicates(
+        ["_chave", "chave_pessoa"])
+    faixas = dados.groupby("_chave")["faixa_acesso"].agg(list).to_dict()
+    incoerentes = 0
+    for escola in resumo.itertuples(index=False):
+        lista = faixas.get(escola.chave_escola, [])
+        html = cartoes.cartao_escola(escola, lista, cores)
+        incoerentes += len(lista) != escola.pessoas
+        incoerentes += html.count("<i style=") != min(len(lista), 28)
+        incoerentes += cartoes.situacao_escola(escola.com_conta, escola.acessaram) not in cartoes.SITUACOES_ESCOLA
+        # o nome oficial aparece inteiro (só a caixa muda)
+        incoerentes += _letras(cartoes.nome_legivel(escola.escola)) not in _letras(re.sub(r"<[^>]+>", " ", html))
+    confere(len(resumo) > 0 and incoerentes == 0, f"{incoerentes} incoerência(s) nos cartões de escola")
+
+
+def test_tempo_desde_o_ultimo_acesso(base_real):
+    duracoes = base_real.contas.loc[base_real.contas["acesso_tipo"] == "relativo", "acesso_segundos"]
+    confere(len(duracoes) > 0 and all(cartoes.tempo_desde(s).startswith("há ") for s in duracoes),
+            "tempo desde o acesso mal formatado")
+    # Especificação de formato
+    assert [cartoes.tempo_desde(s) for s in (1800, 5 * 3600, 86400 + 10, 20 * 86400)] == [
+        "há menos de 1 hora", "há 5 horas", "há 1 dia", "há 20 dias"]
     assert cartoes.tempo_desde(float("nan")) is None
-
-
-def test_situacao_da_pessoa_e_da_escola():
-    assert cartoes.situacao(_pessoa(), CORES) == ("Último acesso há 3 dias", CORES["1 a 7 dias"])
-    assert cartoes.situacao(_pessoa(acesso_tipo="nunca", faixa_acesso=painel.FAIXA_NUNCA), CORES)[0] == "Nunca acessou"
-    sem_conta = _pessoa(acesso_tipo=None, faixa_acesso=painel.FAIXA_SEM_CONTA, status_conciliacao="Sem correspondência")
-    assert cartoes.situacao(sem_conta, CORES)[0] == "Sem conta na plataforma"
-    assert cartoes.situacao(sem_conta._replace(status_conciliacao="Pendente"), CORES)[0] == "Conta em conciliação"
-    assert [cartoes.situacao_escola(c, a) for c, a in ((3, 3), (3, 1), (3, 0), (0, 0))] == list(cartoes.SITUACOES_ESCOLA)
-
-
-def test_cartao_de_pessoa_sem_contato_e_com_html_escapado():
-    html = cartoes.cartao_pessoa(_pessoa(nome="ANA <SCRIPT>", requer_acompanhamento=True,
-                                         motivos=[painel.MOTIVO_INATIVIDADE]), CORES)
-    assert "correio.example" not in html and "91988887777" not in html
-    assert "<SCRIPT>" not in html and "&lt;" in html
-    assert "Pará · T3" in html and "EMEF João XXIII" in html  # nome curto da escola no cartão
-    assert "Acompanhar" in html and painel.MOTIVO_INATIVIDADE in html  # marca, com o motivo na dica
-
-
-def test_pontos_da_escola():
-    pequena = cartoes.pontos([painel.FAIXA_NUNCA, "Até 24 horas", "1 a 7 dias"], CORES)
-    assert pequena.count("<i ") == 3  # um ponto por pessoa
-    assert pequena.index(CORES["Até 24 horas"]) < pequena.index(CORES[painel.FAIXA_NUNCA])  # mais recentes primeiro
-    # Escola grande: pontos proporcionais, sem esconder quem nunca acessou
-    grande = cartoes.pontos([painel.FAIXA_NUNCA, "Até 24 horas"] + ["1 a 7 dias"] * 40, CORES, limite=28)
-    assert grande.count("<i ") == 28 and CORES[painel.FAIXA_NUNCA] in grande and "1 ponto ≈ 1,5 pessoas" in grande

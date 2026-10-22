@@ -16,7 +16,6 @@ import secrets
 from dataclasses import dataclass
 from pathlib import Path
 
-CHAVE_DEMONSTRACAO = "chave-de-demonstracao-nao-usar-com-dados-reais"
 ENDERECOS_LOCAIS = {"localhost", "127.0.0.1", "::1"}
 
 
@@ -50,8 +49,6 @@ def obter_chave_pseudonimizacao(cfg) -> str:
     Trocar a chave invalida as decisões manuais de conciliação e a comparação
     entre importações, porque os identificadores pseudônimos mudam.
     """
-    if cfg.demonstracao:
-        return CHAVE_DEMONSTRACAO
     if cfg.chave_pseudonimizacao:
         if len(cfg.chave_pseudonimizacao) < 32:
             raise ValueError("ETI_CHAVE_PSEUDONIMIZACAO deve ter pelo menos 32 caracteres.")
@@ -136,7 +133,7 @@ class Usuario:
     nome: str
     administrador: bool
     acesso_contatos: bool
-    metodo: str  # oidc | local | demonstracao
+    metodo: str  # oidc | local
 
 
 def oidc_configurado() -> bool:
@@ -171,9 +168,6 @@ def resolver_usuario(cfg) -> Usuario:
     import streamlit as st
 
     from . import ui
-
-    if cfg.demonstracao:
-        return Usuario("demonstracao", "Visitante da demonstração", True, True, "demonstracao")
 
     if oidc_configurado():
         if not st.user.is_logged_in:

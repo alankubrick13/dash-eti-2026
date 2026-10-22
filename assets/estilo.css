@@ -93,13 +93,22 @@
   font-size: 0.88rem;
   color: var(--tinta);
 }
-.eti-demo {
-  margin: 0.75rem 0 0 0;
-  padding: 0.5rem 0.8rem;
-  border-left: 3px solid var(--petroleo);
+/* Selo de dados reais no cabeçalho */
+.eti-modo {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.3rem;
+  margin-top: 0.45rem;
+  padding: 0.18rem 0.6rem 0.18rem 0.45rem;
+  border-radius: 999px;
   background: #EAF3F4;
   color: #0B4F59;
-  font-size: 0.85rem;
+  font-size: 0.78rem;
+  font-weight: 600;
+}
+.eti-modo .eti-icone {
+  font-size: 0.95rem;
+  color: var(--petroleo);
 }
 
 /* ---------------------------------------------------------------- texto */
@@ -581,7 +590,7 @@ h1 {
   overflow-wrap: anywhere;
 }
 .eti-2linhas,
-.eti-3linhas,
+.eti-4linhas,
 .eti-cartao-pessoa .eti-cartao-titulo,
 .eti-cartao-linha span:last-child {
   display: -webkit-box;
@@ -589,8 +598,8 @@ h1 {
   -webkit-box-orient: vertical;
   overflow: hidden;
 }
-.eti-3linhas {
-  -webkit-line-clamp: 3;
+.eti-4linhas {
+  -webkit-line-clamp: 4;
 }
 .eti-1linha span:last-child {
   -webkit-line-clamp: 1;

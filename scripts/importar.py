@@ -70,9 +70,6 @@ def main() -> int:
     args = parser.parse_args()
 
     cfg = config.carregar_configuracao()
-    if cfg.demonstracao:
-        print("ETI_AMBIENTE=demonstracao: use ETI_AMBIENTE=local para importar dados reais.")
-        return 2
     banco = args.banco or cfg.dir_dados / "eti.sqlite3"
     repo = Repositorio(banco, cfg.retencao_importacoes).inicializar()
     pseudo = Pseudonimizador(obter_chave_pseudonimizacao(cfg))

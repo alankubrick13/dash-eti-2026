@@ -1,9 +1,17 @@
-"""Testes de interface com o AppTest do Streamlit (modo demonstração, dados fictícios)."""
+"""Testes de interface com o AppTest do Streamlit, sobre uma cópia do banco real do painel (modo local).
 
+A cópia fica numa pasta temporária: consultas de contato e outras ações auditadas não chegam ao banco
+original. As verificações sobre dados pessoais usam ``confere``, que nunca mostra os valores.
+"""
+
+import shutil
 from pathlib import Path
 
 import pytest
+from conftest import confere
 from streamlit.testing.v1 import AppTest
+
+from src import security
 
 APP = str(Path(__file__).resolve().parent.parent / "app.py")
 
@@ -11,15 +19,21 @@ PAGINAS = [
     "paginas/1_visao_geral.py", "paginas/2_cursistas.py", "paginas/3_atividade.py", "paginas/4_escolas.py",
     "paginas/5_territorio.py", "paginas/6_qualidade_conciliacao.py", "paginas/7_administracao.py",
 ]
-COLUNAS_PROIBIDAS = {"CPF", "E-mail", "Telefone", "WhatsApp", "Data Nascimento", "Raça/Cor", "Gênero"}
+TERMOS_DE_DADOS_INVENTADOS = ("fictíci", "demonstração", "sintétic", "de exemplo")
 
 
 @pytest.fixture
-def app(monkeypatch):
-    monkeypatch.setenv("ETI_AMBIENTE", "demonstracao")
+def app(monkeypatch, tmp_path, dir_dados_real):
+    dados = tmp_path / "dados"
+    shutil.copytree(dir_dados_real, dados)
+    monkeypatch.setenv("ETI_AMBIENTE", "local")
+    monkeypatch.setenv("ETI_PERMITIR_ACESSO_LOCAL_SEM_LOGIN", "1")
+    monkeypatch.setenv("ETI_DIRETORIO_DADOS", str(dados))
+    monkeypatch.delenv("ETI_CHAVE_PSEUDONIMIZACAO", raising=False)
+    monkeypatch.setattr(security, "servidor_em_endereco_local", lambda: True)  # o AppTest não tem servidor
     teste = AppTest.from_file(APP, default_timeout=240)
     teste.run()
-    assert not teste.exception, [e.value for e in teste.exception]
+    confere(not teste.exception, "o painel não abriu com os dados reais")
     return teste
 
 
@@ -28,10 +42,13 @@ def _erros(teste):
 
 
 @pytest.mark.parametrize("pagina", PAGINAS)
-def test_paginas_renderizam_sem_erros(app, pagina):
+def test_paginas_renderizam_com_os_dados_reais(app, pagina):
     app.switch_page(pagina)
     app.run()
-    assert not _erros(app)
+    confere(not _erros(app), f"{pagina}: erro ao montar a página")
+    texto = " ".join([m.value for m in app.markdown] + [h.proto.body for h in app.get("html")]).lower()
+    confere(not any(t in texto for t in TERMOS_DE_DADOS_INVENTADOS), f"{pagina}: menção a dados inventados")
+    confere("dados reais" in texto, f"{pagina}: selo de dados reais ausente")
 
 
 def _cartoes(teste) -> list[str]:
@@ -39,16 +56,19 @@ def _cartoes(teste) -> list[str]:
 
 
 def test_galeria_de_cursistas_nao_expoe_dados_pessoais(app):
+    import re
+
     app.switch_page("paginas/2_cursistas.py")
     app.run()
     cartoes = _cartoes(app)
-    assert len(cartoes) == 24  # primeira página da galeria
+    confere(len(cartoes) == 24, "a primeira página da galeria deve ter 24 cartões")
     base = app.session_state["_contexto"].base
-    emails = set(base.cursistas["email"].dropna())
-    telefones = set(base.cursistas["telefone"].dropna().astype(str))
-    for cartao in cartoes:
-        assert "@" not in cartao and not any(t in cartao for t in telefones if len(t) >= 8)
-    assert not any(e in "".join(cartoes) for e in emails)
+    html = " ".join(cartoes).lower()
+    digitos = re.sub(r"\D", "", html)
+    emails = [str(e).lower() for e in base.cursistas["email"].dropna()]
+    telefones = [re.sub(r"\D", "", str(t)) for t in base.cursistas["telefone"].dropna()]
+    vazados = sum(e in html for e in emails) + sum(len(t) >= 8 and t in digitos for t in telefones)
+    confere("@" not in html and vazados == 0, f"{vazados} contato(s) real(is) nos cartões da galeria")
 
 
 def test_grupos_e_mostrar_mais_da_galeria(app):
@@ -89,21 +109,14 @@ def test_ficha_individual_e_dados_de_contato_auditados(app):
     assert ctx.repo.auditoria().iloc[0]["acao"] == "exibiu_dados_contato"
 
 
-def test_importacao_bloqueia_erro_estrutural_e_confirma_arquivo_valido(app):
+def test_administracao_so_aceita_arquivos_e_bases_oficiais(app):
     app.switch_page("paginas/7_administracao.py")
     app.run()
-    radio = app.radio(key="demo_cadastro")
-    radio.set_value("Cadastro sem a coluna de e-mail (erro estrutural, fictício)").run()
-    app.button(key="validar_cadastro").click().run()
-    assert any("E-mail" in e.value for e in app.error)
-    assert app.button(key="confirmar_cadastro").disabled
-
-    app.radio(key="demo_cadastro").set_value("Cadastro atualizado, com entradas e saídas (fictício)").run()
-    app.button(key="validar_cadastro").click().run()
-    assert not app.button(key="confirmar_cadastro").disabled
-    app.button(key="confirmar_cadastro").click().run()
-    assert any("confirmada" in s.value for s in app.success)
-    assert not _erros(app)
+    confere(not _erros(app), "erro ao montar a Administração")
+    origens = app.radio(key="escolas_modo").options
+    assert origens == ["Baixar microdados oficiais do Inep", "Importar pacote de microdados já baixado (ZIP ou CSV)",
+                       "Importar exportação do Catálogo de Escolas (XLSX ou CSV)"]
+    confere(not [r for r in app.radio if (r.key or "").startswith("demo_")], "seletor de arquivos de exemplo na página")
 
 
 def _textos(teste) -> str:

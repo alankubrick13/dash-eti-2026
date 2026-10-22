@@ -1,137 +1,135 @@
-"""Validação, duplicidades e minimização de dados no pipeline de importação."""
+"""Pipeline de importação aplicado aos arquivos reais: validação, duplicidades, minimização e comparação.
 
-from datetime import date, datetime, timezone
+Casos de erro (coluna ausente, linha repetida) são derivados dos próprios arquivos reais.
+"""
+
+from dataclasses import replace
+from datetime import datetime, timedelta, timezone
 from zoneinfo import ZoneInfo
 
-from conftest import cpf, linha_cadastro, tabela
+import pandas as pd
+import pytest
+from conftest import FUSO, PAPEIS_CURSISTA, confere, quadro
 
 from src.importacao import comparar_importacoes, preparar_atividade, preparar_cadastro
-from src.loaders import CABECALHOS_MOODLE_TEXTO
+from src.loaders import CAMPOS_CADASTRO, mapear_colunas
+from src.normalization import interpretar_data, validar_cpf
 from src.persistence import COLUNAS
 
 
-def _previa(cabecalhos, linhas, pseudo):
-    return preparar_cadastro([tabela("cad.xlsx", cabecalhos, linhas)], pseudo, hoje=date(2026, 10, 20))
+def sem_coluna(tabela, interno: str):
+    """A tabela real sem a coluna de um campo (como se o arquivo viesse sem ela)."""
+    mapa = mapear_colunas(tabela.cabecalhos, CAMPOS_CADASTRO).original_para_interno
+    original = next(c for c, i in mapa.items() if i == interno)
+    return replace(tabela, cabecalhos=[c for c in tabela.cabecalhos if c != original],
+                   dados=tabela.dados.drop(columns=[original]))
 
 
-def test_registros_invalidos_sao_sinalizados_e_nao_excluidos(cabecalhos_cadastro, pseudo):
-    linhas = [
-        linha_cadastro("ANA PAULA SOUZA", email="ana.paula@correio"),  # e-mail inválido
-        linha_cadastro("BRUNO COSTA", email="bruno@correio.example", inep=None),  # sem INEP
-        linha_cadastro("CARLA DIAS", email="carla@correio.example", inep=1501234),  # INEP com 7 dígitos
-        linha_cadastro("DANIEL REIS", email="daniel@correio.example", nascimento="31/02/1980"),
-        linha_cadastro("ELISA MOTA", email="elisa@correio.example", cod_ibge=1302603),  # IBGE do AM numa linha do PA
-    ]
-    previa = _previa(cabecalhos_cadastro, linhas, pseudo)
-    assert previa.pode_confirmar
-    assert len(previa.registros) == 5
-    codigos = dict(zip(previa.registros["nome"], previa.registros["problemas"]))
-    assert "email_invalido" in codigos["ANA PAULA SOUZA"]
-    assert "inep_ausente" in codigos["BRUNO COSTA"]
-    assert "inep_invalido" in codigos["CARLA DIAS"]
-    assert "nascimento_invalido" in codigos["DANIEL REIS"]
-    assert "ibge_uf_divergente" in codigos["ELISA MOTA"]
-    assert previa.resumo["n_com_problemas"] == 5
+def test_cadastro_real_validado_sem_excluir_registros(previa_cadastro, tabelas_cadastro):
+    assert previa_cadastro.pode_confirmar
+    assert len(previa_cadastro.registros) == sum(len(t.dados) for t in tabelas_cadastro)
+    assert list(previa_cadastro.registros.columns) == COLUNAS["cadastro"]
+    assert set(previa_cadastro.registros["arquivo_origem"]) == {t.arquivo for t in tabelas_cadastro}
 
 
-def test_inep_e_ibge_viram_texto_de_8_e_7_digitos(cabecalhos_cadastro, pseudo):
-    previa = _previa(cabecalhos_cadastro, [linha_cadastro(inep=15012345, cod_ibge=1501402)], pseudo)
-    registro = previa.registros.iloc[0]
-    assert registro["inep"] == "15012345" and isinstance(registro["inep"], str)
-    assert registro["cod_ibge"] == "1501402" and registro["cod_ibge_status"] == "valido"
+def test_problemas_sinalizados_conforme_cada_campo(previa_cadastro):
+    reg = previa_cadastro.registros
+    esperado = {
+        "email_invalido": reg["email_status"] == "invalido", "email_ausente": reg["email_status"] == "ausente",
+        "cpf_invalido": reg["cpf_status"] == "invalido", "cpf_ausente": reg["cpf_status"] == "ausente",
+        "inep_ausente": reg["inep_status"] == "ausente", "inep_invalido": reg["inep_status"] == "invalido",
+        "ibge_uf_divergente": reg["cod_ibge_status"] == "uf_divergente",
+        "ibge_inexistente": reg["cod_ibge_status"] == "inexistente",
+        "duplicado_cpf": reg["dup_cpf"].notna(), "duplicado_email": reg["dup_email"].notna(),
+        "linha_repetida": reg["dup_linha"].notna(),
+    }
+    divergentes = sum(int((reg["problemas"].map(lambda p, c=codigo: c in p) != mascara).sum())
+                      for codigo, mascara in esperado.items())
+    confere(divergentes == 0, f"{divergentes} registro(s) real(is) com problema sinalizado de forma incoerente")
+    assert previa_cadastro.resumo["n_com_problemas"] == int((reg["problemas"].map(len) > 0).sum())
 
 
-def test_duplicidades_por_cpf_email_e_linha(cabecalhos_cadastro, pseudo):
-    mesma_pessoa = cpf(7)
-    linhas = [
-        linha_cadastro("ANA SOUZA", email="ana@correio.example", cpf_valor=mesma_pessoa),
-        linha_cadastro("ANA SOUZA", email="ana.souza@mail.example", cpf_valor=mesma_pessoa),  # mesmo CPF
-        linha_cadastro("JOAO LIMA", email="escola@correio.example"),
-        linha_cadastro("PEDRO REIS", email="escola@correio.example"),  # e-mail compartilhado
-        linha_cadastro("RITA ALVES", email="rita@correio.example"),
-        linha_cadastro("RITA ALVES", email="rita@correio.example"),  # linha idêntica
-    ]
-    previa = _previa(cabecalhos_cadastro, linhas, pseudo)
-    reg = previa.registros
-    assert reg.loc[0, "dup_cpf"] == reg.loc[1, "dup_cpf"] is not None
-    assert reg.loc[2, "dup_email"] == reg.loc[3, "dup_email"] is not None
-    assert reg.loc[4, "dup_linha"] == reg.loc[5, "dup_linha"] is not None
-    # Mesmo CPF => mesma pessoa; e-mail compartilhado entre pessoas diferentes => pessoas distintas
-    assert reg.loc[0, "chave_pessoa"] == reg.loc[1, "chave_pessoa"]
-    assert reg.loc[2, "chave_pessoa"] != reg.loc[3, "chave_pessoa"]
-    assert previa.resumo["n_pessoas"] == 4  # Ana (2 registros), João, Pedro, Rita (2 registros)
-    assert previa.resumo["n_duplicados"] == 6
+def test_codigos_gravados_como_texto(previa_cadastro):
+    reg = previa_cadastro.registros
+    inep = reg.loc[reg["inep_status"] == "valido", "inep"]
+    ibge = reg.loc[reg["cod_ibge_status"] == "valido", "cod_ibge"]
+    confere(len(inep) > 0 and inep.map(lambda c: isinstance(c, str) and len(c) == 8 and c.isdigit()).all(),
+            "código INEP real não gravado como texto de 8 dígitos")
+    confere(ibge.map(lambda c: isinstance(c, str) and len(c) in (2, 7) and c.isdigit()).all(),
+            "código IBGE real não gravado como texto de 2 ou 7 dígitos")
 
 
-def test_cpf_e_nascimento_nao_sao_persistidos(cabecalhos_cadastro, pseudo):
-    valor = cpf(11)
-    previa = _previa(cabecalhos_cadastro, [linha_cadastro("ANA SOUZA", cpf_valor=valor, nascimento="02/03/1977")], pseudo)
-    assert "cpf" not in previa.registros.columns and "data_nascimento" not in previa.registros.columns
-    texto = " ".join(str(v) for v in previa.registros.iloc[0].tolist())
-    digitos = valor.replace(".", "").replace("-", "")
-    assert valor not in texto and digitos not in texto and "1977" not in texto
-    assert previa.registros.iloc[0]["chave_pessoa"].startswith("cpf:")
+def test_duplicidades_reais_e_linha_repetida(previa_cadastro, tabelas_cadastro, pseudo):
+    reg = previa_cadastro.registros
+    mesma_pessoa = reg.dropna(subset=["dup_cpf"]).groupby("dup_cpf")["chave_pessoa"].nunique()
+    confere((mesma_pessoa == 1).all(), "registros com o mesmo CPF tratados como pessoas diferentes")
+    assert previa_cadastro.resumo["n_pessoas"] == reg["chave_pessoa"].nunique()
+    # A primeira linha real repetida no arquivo: sinalizada, sem ser excluída
+    primeira = tabelas_cadastro[0]
+    repetida = replace(primeira, dados=pd.concat([primeira.dados, primeira.dados.iloc[[0]]], ignore_index=True))
+    previa = preparar_cadastro([repetida, *tabelas_cadastro[1:]], pseudo)
+    assert len(previa.registros) == len(reg) + 1
+    confere(int(previa.registros["dup_linha"].notna().sum()) >= 2, "linha repetida não sinalizada")
 
 
-def test_coluna_obrigatoria_ausente_bloqueia(cabecalhos_cadastro, pseudo):
-    sem_email = [h for h in cabecalhos_cadastro if h != "E-mail"]
-    linha = [v for h, v in zip(cabecalhos_cadastro, linha_cadastro()) if h != "E-mail"]
-    previa = _previa(sem_email, [linha], pseudo)
+def test_cpf_e_nascimento_reais_nao_sao_gravados(previa_cadastro, tabelas_cadastro):
+    reg = previa_cadastro.registros
+    assert "cpf" not in reg.columns and "data_nascimento" not in reg.columns
+    texto = "\n".join(" ".join(map(str, linha)) for linha in reg.itertuples(index=False))
+    dados = quadro(tabelas_cadastro, CAMPOS_CADASTRO)
+    cpfs = {validar_cpf(c)[0] for c in dados["cpf"] if validar_cpf(c)[1].startswith("valido")}
+    nascimentos = {interpretar_data(d)[0] for d in dados["data_nascimento"] if interpretar_data(d)[1] == "valida"}
+    vazados = sum(c in texto for c in cpfs)
+    vazados += sum(d.strftime("%d/%m/%Y") in texto or d.isoformat() in texto for d in nascimentos)
+    confere(len(cpfs) > 0 and vazados == 0, f"{vazados} CPF(s) ou data(s) de nascimento real(is) nos registros")
+    confere(reg["chave_pessoa"].str.match(r"^(cpf|email|nome):").all(), "chave de pessoa fora do padrão pseudônimo")
+
+
+def test_coluna_obrigatoria_ausente_bloqueia(tabelas_cadastro, pseudo):
+    previa = preparar_cadastro([sem_coluna(t, "email") for t in tabelas_cadastro], pseudo)
     assert not previa.pode_confirmar
     assert any("E-mail" in b for b in previa.bloqueios)
 
 
-def test_multiplos_arquivos_formam_o_cadastro(cabecalhos_cadastro, pseudo):
-    t1 = tabela("principal.xlsx", cabecalhos_cadastro, [linha_cadastro("ANA SOUZA", email="ana@correio.example")])
-    estadual = linha_cadastro("BRUNO LIMA", email="bruno@correio.example", cod_ibge=11, uf="RO", inep=11012345)
-    t2 = tabela("novos.xlsx", cabecalhos_cadastro, [estadual])
-    previa = preparar_cadastro([t1, t2], pseudo, hoje=date(2026, 10, 20))
-    assert set(previa.registros["arquivo_origem"]) == {"principal.xlsx", "novos.xlsx"}
-    assert previa.registros.iloc[1]["cod_ibge_status"] == "valido"  # código de UF para ente estadual
+def test_entes_estaduais_com_codigo_da_uf(previa_cadastro):
+    reg = previa_cadastro.registros
+    estaduais = reg[reg["cod_ibge"].fillna("").str.len() == 2]
+    if estaduais.empty:
+        pytest.skip("o cadastro real não tem entes estaduais")
+    confere((estaduais["cod_ibge_status"] == "valido").all(), "ente estadual com código de UF marcado como inválido")
 
 
-def _atividade(linhas):
-    return tabela("participantes.txt", CABECALHOS_MOODLE_TEXTO, linhas)
+def test_atividade_real_sem_data_de_exportacao(previa_atividade, tabela_atividade):
+    reg = previa_atividade.registros
+    assert len(reg) == len(tabela_atividade.dados)
+    confere(reg.loc[reg["acesso_tipo"] == "relativo", "acesso_momento"].isna().all(),
+            "tempo relativo virou data sem a data de exportação")
+    assert any("não foi informado" in a for a in previa_atividade.avisos)
+    eh_estudante = reg["papeis"].fillna("").str.contains("Estudante")
+    confere(((reg["eh_cursista"] == 1) == eh_estudante).all(), "papel de cursista classificado de forma incoerente")
+    confere(((reg["eh_equipe"] == 1) == (~eh_estudante & reg["papeis"].notna())).all(),
+            "conta da equipe classificada de forma incoerente")
 
 
-def test_atividade_tempo_relativo_com_e_sem_referencia(pseudo):
-    linhas = [["ANA SOUZA", "ana@mail.example", "Estudante", "Para 1", "3 dias 2 horas", "Ativo"],
-              ["RITA ALVES", "rita@formacao.example", "Formador (Tutor não editor)", "Para 1", "Nunca", "Ativo"]]
-    sem_ref = preparar_atividade([_atividade(linhas)], pseudo, None, "America/Sao_Paulo", ["Estudante"])
-    reg = sem_ref.registros
-    assert reg.loc[0, "acesso_tipo"] == "relativo"
-    assert reg.loc[0, "acesso_segundos"] == 3 * 86400 + 2 * 3600
-    assert reg.loc[0, "acesso_momento"] is None  # sem data de exportação, nenhuma data é inventada
-    assert any("não foi informado" in a for a in sem_ref.avisos)
-    assert (reg.loc[0, "eh_cursista"], reg.loc[0, "eh_equipe"]) == (1, 0)
-    assert (reg.loc[1, "eh_cursista"], reg.loc[1, "eh_equipe"]) == (0, 1)
-
-    referencia = datetime(2026, 10, 19, 17, 30, tzinfo=ZoneInfo("America/Sao_Paulo"))
-    com_ref = preparar_atividade([_atividade(linhas)], pseudo, referencia, "America/Sao_Paulo", ["Estudante"])
-    momento = datetime.fromisoformat(com_ref.registros.loc[0, "acesso_momento"])
-    assert momento == datetime(2026, 10, 16, 18, 30, tzinfo=timezone.utc)
-    assert "19/10/2026 17:30" in com_ref.referencia_descricao
+def test_atividade_real_com_referencia(tabela_atividade, arquivo_atividade, pseudo):
+    """Referência real: o momento em que o arquivo da plataforma foi salvo neste computador."""
+    referencia = datetime.fromtimestamp(arquivo_atividade.stat().st_mtime, ZoneInfo(FUSO))
+    previa = preparar_atividade([tabela_atividade], pseudo, referencia, FUSO, PAPEIS_CURSISTA)
+    reg = previa.registros[previa.registros["acesso_tipo"] == "relativo"]
+    calculados = [datetime.fromisoformat(m) for m in reg["acesso_momento"]]
+    esperados = [referencia.astimezone(timezone.utc) - timedelta(seconds=s) for s in reg["acesso_segundos"]]
+    confere(len(reg) > 0 and all(abs((c - e).total_seconds()) < 1 for c, e in zip(calculados, esperados)),
+            "data do último acesso não confere com a referência menos o tempo relativo")
+    assert referencia.strftime("%d/%m/%Y %H:%M") in previa.referencia_descricao
 
 
-def test_atividade_data_absoluta_contada_ate_a_referencia(pseudo):
-    linhas = [["ANA SOUZA", "ana@mail.example", "Estudante", "Para 1", "10/10/2026 08:00", "Ativo"]]
-    referencia = datetime(2026, 10, 20, 8, 0, tzinfo=ZoneInfo("America/Sao_Paulo"))
-    previa = preparar_atividade([_atividade(linhas)], pseudo, referencia, "America/Sao_Paulo", ["Estudante"])
-    assert previa.registros.loc[0, "acesso_tipo"] == "absoluto"
-    assert previa.registros.loc[0, "acesso_segundos"] == 10 * 86400
-    assert previa.registros.loc[0, "acesso_base"] == "referencia_informada"
-
-
-def test_comparacao_entre_importacoes(cabecalhos_cadastro, pseudo):
-    antes = _previa(cabecalhos_cadastro, [linha_cadastro("ANA SOUZA", email="ana@correio.example"),
-                                          linha_cadastro("BRUNO LIMA", email="bruno@correio.example")], pseudo)
-    depois = _previa(cabecalhos_cadastro, [linha_cadastro("ANA SOUZA", email="ana.nova@correio.example"),
-                                           linha_cadastro("CARLA DIAS", email="carla@correio.example")], pseudo)
-    dif = comparar_importacoes("cadastro", depois.registros, antes.registros)
-    assert (dif["entraram"], dif["sairam"], dif["permaneceram"]) == (1, 1, 1)
-    assert dif["alteracoes_por_campo"]["E-mail"] == 1  # mudança de e-mail da mesma pessoa (mesmo CPF)
-
-
-def test_colunas_gravadas_correspondem_ao_esquema(cabecalhos_cadastro, pseudo):
-    previa = _previa(cabecalhos_cadastro, [linha_cadastro()], pseudo)
-    assert list(previa.registros.columns) == COLUNAS["cadastro"]
+def test_comparacao_entre_versoes_reais_do_cadastro(tabelas_cadastro, previa_cadastro, pseudo):
+    if len(tabelas_cadastro) < 2:
+        pytest.skip("só há uma planilha do cadastro")
+    principal = preparar_cadastro(tabelas_cadastro[:1], pseudo)
+    dif = comparar_importacoes("cadastro", previa_cadastro.registros, principal.registros)
+    antes, depois = set(principal.registros["chave_pessoa"]), set(previa_cadastro.registros["chave_pessoa"])
+    assert (dif["entraram"], dif["sairam"], dif["permaneceram"]) == (len(depois - antes), len(antes - depois),
+                                                                     len(antes & depois))
+    assert dif["registros_depois"] - dif["registros_antes"] == len(tabelas_cadastro[1].dados) + sum(
+        len(t.dados) for t in tabelas_cadastro[2:])

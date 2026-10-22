@@ -1,82 +1,86 @@
-"""Persistência: troca transacional de retratos, retenção, decisões e permissões."""
+"""Persistência com as importações reais: troca transacional, retenção, decisões e permissões.
 
+Tudo é gravado num banco temporário; o banco do painel não é usado.
+"""
+
+import getpass
 import os
 import stat
-from datetime import date
 
 import pytest
-from conftest import linha_cadastro, tabela
+from conftest import confere
 
 from src import importacao
+from src import reconciliation as rc
 from src.persistence import Repositorio
+from test_importacao import sem_coluna
+
+USUARIO = f"local:{getpass.getuser()}"
 
 
-def _previa(pseudo, cabecalhos, nomes):
-    linhas = [linha_cadastro(n, email=f"{n.split()[0].lower()}@correio.example") for n in nomes]
-    return importacao.preparar_cadastro([tabela("cad.xlsx", cabecalhos, linhas)], pseudo, hoje=date(2026, 10, 20))
-
-
-def test_importacao_falha_preserva_versao_anterior(repo, pseudo, cabecalhos_cadastro, monkeypatch):
-    primeira = _previa(pseudo, cabecalhos_cadastro, ["ANA SOUZA", "BRUNO LIMA"])
-    id1 = importacao.confirmar(repo, primeira, "teste")
-    segunda = _previa(pseudo, cabecalhos_cadastro, ["CARLA DIAS", "DANIEL REIS", "ELISA MOTA"])
-    # Simula falha no meio da gravação (depois de inserir parte dos dados)
+def test_falha_na_gravacao_preserva_a_versao_anterior(repo, previa_cadastro, tabelas_cadastro, pseudo, monkeypatch):
+    primeira = importacao.preparar_cadastro(tabelas_cadastro[:1], pseudo)
+    id1 = importacao.confirmar(repo, primeira, USUARIO)
     original = Repositorio._expurgar
 
-    def falhar(self, con, fonte):
-        raise RuntimeError("falha simulada")
+    def falhar(self, con, fonte):  # falha depois de inserir a nova versão, antes de concluir
+        raise RuntimeError("falha simulada na gravação")
 
     monkeypatch.setattr(Repositorio, "_expurgar", falhar)
     with pytest.raises(RuntimeError):
-        importacao.confirmar(repo, segunda, "teste")
+        importacao.confirmar(repo, previa_cadastro, USUARIO)
     monkeypatch.setattr(Repositorio, "_expurgar", original)
-    ativa = repo.importacao_ativa("cadastro")
-    assert ativa["id"] == id1
-    assert sorted(repo.registros("cadastro")["nome"]) == ["ANA SOUZA", "BRUNO LIMA"]
-    assert repo.historico()["status"].tolist() == ["ativa"]  # nenhum resto da importação desfeita
+    assert repo.importacao_ativa("cadastro")["id"] == id1
+    assert len(repo.registros("cadastro")) == len(primeira.registros)
+    assert repo.historico()["status"].tolist() == ["ativa"]  # nada da importação desfeita ficou para trás
 
 
-def test_previa_bloqueada_nao_pode_ser_confirmada(repo, pseudo, cabecalhos_cadastro):
-    sem_nome = [h for h in cabecalhos_cadastro if h != "Nome"]
-    linha = [v for h, v in zip(cabecalhos_cadastro, linha_cadastro()) if h != "Nome"]
-    previa = importacao.preparar_cadastro([tabela("x.xlsx", sem_nome, [linha])], pseudo)
+def test_previa_bloqueada_nao_pode_ser_confirmada(repo, tabelas_cadastro, pseudo):
+    previa = importacao.preparar_cadastro([sem_coluna(t, "nome") for t in tabelas_cadastro], pseudo)
     with pytest.raises(ValueError):
-        importacao.confirmar(repo, previa, "teste")
+        importacao.confirmar(repo, previa, USUARIO)
     assert repo.importacao_ativa("cadastro") is None
 
 
-def test_retencao_expurga_retratos_antigos(repo, pseudo, cabecalhos_cadastro):
-    ids = [importacao.confirmar(repo, _previa(pseudo, cabecalhos_cadastro, [f"PESSOA NUMERO {i}"]), "teste")
-           for i in range(4)]
+def test_retencao_expurga_versoes_antigas(repo, previa_cadastro):
+    ids = [importacao.confirmar(repo, previa_cadastro, USUARIO) for _ in range(4)]
     historico = repo.historico("cadastro").set_index("id")["status"].to_dict()
     assert historico[ids[3]] == "ativa" and historico[ids[2]] == "substituida"
     assert historico[ids[0]] == historico[ids[1]] == "expurgada"
-    assert repo.registros("cadastro", ids[0]).empty  # dados apagados; metadados mantidos
+    assert repo.registros("cadastro", ids[0]).empty  # registros apagados; metadados mantidos
+    assert len(repo.registros("cadastro", ids[3])) == len(previa_cadastro.registros)
     assert repo.importacao_anterior("cadastro")["id"] == ids[2]
 
 
-def test_decisoes_e_versao(repo):
+def test_decisoes_sobre_um_par_real(repo, previa_cadastro, previa_atividade):
+    r = rc.conciliar(previa_cadastro.registros, previa_atividade.registros)
+    par = r.associacoes.iloc[0]
+    pessoa = previa_cadastro.registros.set_index("id_registro").loc[par["id_registro"], "chave_pessoa"]
+    conta = previa_atividade.registros.set_index("id_conta").loc[par["id_conta"], "chave_conta"]
     versao = repo.versao()
-    decisao = repo.registrar_decisao("cpf:1", "email:a@b.example", "associar", "conferido", "coord@x.example")
+    assert repo.registrar_decisao(pessoa, conta, "associar", "conferido", USUARIO) > 0
     assert repo.versao() != versao
-    assert repo.decisoes()["decisao"].tolist() == ["associar"]
-    repo.registrar_decisao("cpf:1", "email:a@b.example", "rejeitar", None, "coord@x.example")
-    assert repo.decisoes()["decisao"].tolist() == ["rejeitar"]  # nova decisão substitui a anterior do mesmo par
+    repo.registrar_decisao(pessoa, conta, "rejeitar", None, USUARIO)
+    assert repo.decisoes()["decisao"].tolist() == ["rejeitar"]  # a nova decisão substitui a anterior do mesmo par
     antes = repo.versao()
-    repo.revogar_decisao(int(repo.decisoes()["id"].iloc[0]), "coord@x.example")
+    repo.revogar_decisao(int(repo.decisoes()["id"].iloc[0]), USUARIO)
     assert repo.decisoes().empty and repo.versao() != antes
-    assert decisao > 0
     assert {"conciliacao_associar", "conciliacao_rejeitar", "conciliacao_revogada"} <= set(repo.auditoria()["acao"])
 
 
 def test_parametros_com_padrao(repo):
     assert repo.parametros()["faixas_inatividade_dias"] == [1, 7, 14]
-    repo.salvar_parametros({"faixas_inatividade_dias": [5, 10, 20], "chave_desconhecida": 1}, "admin")
+    repo.salvar_parametros({"faixas_inatividade_dias": [5, 10, 20], "chave_desconhecida": 1}, USUARIO)
     assert repo.parametros()["faixas_inatividade_dias"] == [5, 10, 20]
+    assert "chave_desconhecida" not in repo.parametros()
 
 
 @pytest.mark.skipif(os.name != "posix", reason="permissões POSIX")
-def test_banco_criado_com_permissao_restrita(tmp_path):
+def test_banco_e_pasta_com_permissao_restrita(tmp_path, dir_dados_real):
     Repositorio(tmp_path / "privado" / "eti.sqlite3").inicializar()
     assert stat.S_IMODE(os.stat(tmp_path / "privado" / "eti.sqlite3").st_mode) == 0o600
     assert stat.S_IMODE(os.stat(tmp_path / "privado").st_mode) == 0o700
+    from conftest import BANCO_REAL, DIR_DADOS
+
+    confere(stat.S_IMODE(os.stat(BANCO_REAL).st_mode) == 0o600, "o banco do painel não está com permissão 600")
+    confere(stat.S_IMODE(os.stat(DIR_DADOS).st_mode) == 0o700, "a pasta de dados do painel não está com permissão 700")

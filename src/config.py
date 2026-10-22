@@ -13,13 +13,13 @@ from pathlib import Path
 RAIZ = Path(__file__).resolve().parent.parent
 DIR_ASSETS = RAIZ / "assets"
 DIR_REFERENCIAS = RAIZ / "data" / "referencias"
-DIR_SINTETICOS = RAIZ / "data" / "synthetic"
 ARQ_MUNICIPIOS = DIR_REFERENCIAS / "municipios_ibge.csv"
 ARQ_CERT_INEP = DIR_ASSETS / "certificados" / "rnp_icpedu_gr46_ov_tls_ca_2025.pem"
 ARQ_CSS = DIR_ASSETS / "estilo.css"
 DIR_MARCA = DIR_ASSETS / "marca"
 
-AMBIENTES = ("demonstracao", "local", "producao")
+# O painel trabalha só com dados reais: os fornecidos pela coordenação e os de fontes oficiais (Inep, IBGE).
+AMBIENTES = ("local", "producao")
 
 NOME_PROGRAMA = "Programa Escola em Tempo Integral"
 NOME_FERRAMENTA = "Painel de acompanhamento da formação"
@@ -101,10 +101,6 @@ class Configuracao:
     chave_pseudonimizacao: str | None
 
     @property
-    def demonstracao(self) -> bool:
-        return self.ambiente == "demonstracao"
-
-    @property
     def producao(self) -> bool:
         return self.ambiente == "producao"
 
@@ -155,7 +151,10 @@ def _verdadeiro(valor: str | None) -> bool:
 
 def carregar_configuracao() -> Configuracao:
     _carregar_dotenv(RAIZ / ".env")
-    ambiente = (ler_opcao("ETI_AMBIENTE", "demonstracao") or "demonstracao").lower()
+    ambiente = (ler_opcao("ETI_AMBIENTE", "local") or "local").lower()
+    if ambiente == "demonstracao":
+        raise ValueError("O modo demonstração foi removido: o painel trabalha só com dados reais. "
+                         "Use ETI_AMBIENTE=local (este computador) ou producao (servidor institucional).")
     if ambiente not in AMBIENTES:
         raise ValueError(
             f"ETI_AMBIENTE inválido: use um de {', '.join(AMBIENTES)}."

@@ -8,12 +8,16 @@ código INEP.
 > **Natureza da ferramenta.** É uma ferramenta de apoio à coordenação da formação. **Não é sistema oficial
 > do Ministério da Educação**, e a interface informa isso em todas as páginas.
 
+> **Só dados reais.** O painel trabalha exclusivamente com os arquivos fornecidos pela coordenação (cadastro
+> e exportação da plataforma) e com bases oficiais (microdados do Inep, APIs do IBGE). Não há modo de
+> demonstração, dados de exemplo nem dados gerados, nem no painel nem nos testes.
+
 ---
 
 ## Sumário
 
 1. [Instalação (Ubuntu/Linux)](#1-instalação-ubuntulinux)
-2. [Execução: os três modos](#2-execução-os-três-modos)
+2. [Execução](#2-execução)
 3. [Como importar as planilhas](#3-como-importar-as-planilhas)
 4. [Como atualizar os dados escolares do Inep](#4-como-atualizar-os-dados-escolares-do-inep)
 5. [O que o painel mostra](#5-o-que-o-painel-mostra)
@@ -40,27 +44,30 @@ python3 -m venv .venv
 .venv/bin/pip install -r requirements-dev.txt   # apenas para rodar os testes
 ```
 
-## 2. Execução: os três modos
+## 2. Execução
 
 O modo é definido pela variável `ETI_AMBIENTE`, que pode estar no ambiente, num arquivo `.env` (veja
-`.env.example`) ou em `.streamlit/secrets.toml`.
+`.env.example`) ou em `.streamlit/secrets.toml`. Os dois modos usam os mesmos dados reais.
 
 | Modo | Para quê | Dados | Login |
 |---|---|---|---|
-| `demonstracao` (padrão) | Apresentação e publicação no Streamlit Community Cloud | **Somente fictícios**, gerados na hora. Cada visitante recebe uma cópia própria, apagada depois de 12 h | Não exige |
-| `local` | Uso com dados reais num computador confiável | Reais, em `data/privado/` (fora do git) | OIDC; ou dispensado apenas com servidor em `localhost` |
+| `local` (padrão) | Uso num computador confiável | Reais, em `data/privado/` (fora do git) | OIDC; ou dispensado apenas com servidor em `localhost` |
 | `producao` | Servidor institucional | Reais | **OIDC obrigatório** + lista de e-mails autorizados |
 
 ```bash
-# Demonstração (dados fictícios)
-.venv/bin/streamlit run app.py
+# Uso local com dados reais, sem login, acessível só neste computador (atalho)
+./abrir_painel.sh
 
-# Uso local com dados reais, sem login, acessível só neste computador
+# O mesmo, por extenso
 ETI_AMBIENTE=local ETI_PERMITIR_ACESSO_LOCAL_SEM_LOGIN=1 \
   .venv/bin/streamlit run app.py --server.address localhost
 ```
 
 Depois, abra o endereço indicado no terminal (normalmente http://localhost:8501).
+
+O cabeçalho traz o selo "Dados reais". Enquanto uma base não é importada, as páginas dizem que ela
+falta; nunca a preenchem com dados de exemplo. `ETI_AMBIENTE=demonstracao` é recusado com uma mensagem:
+esse modo foi removido.
 
 O acesso local sem login é recusado se o servidor não estiver ligado em `localhost`/`127.0.0.1`. Em
 produção, veja a [seção 12](#12-o-que-falta-para-um-ambiente-institucional-de-produção).
@@ -168,7 +175,7 @@ o ano de referência.
 | **Visão geral** | Indicadores de cadastro e de presença na plataforma, cada um com definição, fórmula, fonte e limitações no ícone de ajuda, e com numerador e denominador abaixo do valor. Também traz o aviso de pendências de conciliação, a situação de cada estado (pela turma ou pela UF do cadastro), o mapa de calor das turmas, o mapa do acesso por município, os critérios de acompanhamento, o cargo e a origem da vaga. |
 | **Cursistas** | Galeria de cartões, um por pessoa: iniciais na cor da situação de acesso, cargo, escola, município e turma, a situação na plataforma ("Último acesso há 3 dias", "Nunca acessou"…) e a marca "Acompanhar" quando a pessoa entra nos critérios de acompanhamento. Cartões de filtro no topo (todas, requerem acompanhamento, acesso recente, nunca acessaram, sem conta, conta em conciliação), busca por nome, escola, município ou turma, e ordenação ("Atenção primeiro" é a padrão). Os cartões não mostram CPF, nascimento nem contatos. |
 | **Atividade e participação** | Situação das contas e tempo desde o último acesso, comparação por grupo, UF, ciclo, articulador ou papel, e listas de verificação: prioridade, sem registro de acesso, contas sem cadastro e contas em revisão. |
-| **Escolas** | Galeria de cartões, um por escola: município, nome (as designações longas viram a sigla de uso corrente, como EMEF), um ponto por cursista na cor da sua situação de acesso e a barra de quantos já acessaram. Cartões de filtro pela situação da escola (todos já acessaram, parte ainda não, ninguém acessou, ninguém com conta), busca e ordenação. Abaixo, o panorama das escolas no Censo e a situação dos códigos INEP. |
+| **Escolas** | Galeria de cartões, um por escola: município, nome oficial (como publicado pelo Inep), um ponto por cursista na cor da sua situação de acesso e a barra de quantos já acessaram. Cartões de filtro pela situação da escola (todos já acessaram, parte ainda não, ninguém acessou, ninguém com conta), busca e ordenação. Abaixo, o panorama das escolas no Censo e a situação dos códigos INEP. |
 | **Mapa e território** | Mapa dos municípios (malhas oficiais do IBGE), colorido por acesso ao curso, por quem nunca acessou, por quem requer acompanhamento, por cursistas ou por escolas. Ao clicar em um município, aparecem os números dele e os cartões das suas escolas; clicar em uma escola abre a ficha dela. Também traz a distribuição por UF e por ente e o cruzamento entre o estado da turma e a UF do cadastro. |
 | **Qualidade e conciliação** | Duplicidades, preenchimento, códigos INEP e IBGE, revisão das sugestões de conciliação (associar, rejeitar, associar manualmente, desfazer, revogar), histórico e diferenças entre importações, e o relatório de inconsistências. |
 | **Administração** | Importações com prévia, base escolar, parâmetros operacionais, auditoria e relatórios. |
@@ -263,11 +270,11 @@ cruzamento.
 | Uploads | A extensão e a assinatura binária são conferidas. Arquivos com macros são recusados, há proteção contra *zip bomb* e há limites de tamanho e de linhas. |
 | Arquivos | O banco é criado com permissão 600 e a pasta de dados com 700. O `.gitignore` bloqueia planilhas, bancos, `.env`, `secrets.toml` e a marca. |
 | Retenção | Mantêm-se as últimas N versões de cada base (`ETI_RETENCAO_IMPORTACOES`, padrão 3). As mais antigas têm os registros apagados e só os metadados ficam. |
-| Cache | Os dados carregados ficam no cache do processo, chaveado pela versão do banco. O cache só é consultado depois da autorização do usuário, e todos os coordenadores autorizados veem as mesmas informações. Na demonstração, cada sessão tem banco próprio. |
+| Cache | Os dados carregados ficam no cache do processo, chaveado pela versão do banco. O cache só é consultado depois da autorização do usuário, e todos os coordenadores autorizados veem as mesmas informações. |
 
 Repositório privado não é proteção de dados, e hospedagem gratuita não está automaticamente autorizada
-para dados institucionais. **A versão de demonstração na nuvem deve usar apenas dados fictícios**, e o
-envio de arquivos fica desativado nesse modo.
+para dados institucionais: o painel só deve ser publicado em hospedagem aprovada pela instituição
+(seção 12).
 
 ## 8. Identidade visual
 
@@ -311,50 +318,66 @@ src/
   metrics.py                indicadores documentados
   persistence.py            SQLite com troca transacional, decisões, parâmetros, auditoria
   security.py               pseudonimização, mascaramento, logs, autenticação
-  ambiente.py               repositório por modo (demonstração com banco por sessão)
-  synthetic.py              gerador de dados fictícios
+  ambiente.py               repositório de dados (banco SQLite em data/privado)
   mapas.py                  mapa dos municípios (malhas do IBGE) e agregação por município
   cartoes.py                cartões das galerias e peças visuais das fichas
   fichas.py                 fichas da escola e do cursista (gavetas laterais)
   graficos.py, ui.py        gráficos e componentes de interface
-scripts/                    importar.py (CLI), gerar_dados_sinteticos.py
+scripts/                    importar.py (importação pela linha de comando)
 assets/                     estilo.css, certificado intermediário do Inep, pasta para a marca
 static/fonts/               Inter (OFL)
 data/referencias/           lista oficial de municípios e malhas territoriais do IBGE (Região Norte)
-tests/                      121 testes (pytest + AppTest)
+tests/                      99 testes com os dados reais (pytest + AppTest)
 .streamlit/config.toml      tema, fontes, segurança de erros e uploads
 ```
 
 ## 10. Testes e desempenho
 
 ```bash
-.venv/bin/python -m pytest
+.venv/bin/python -m pytest                 # todos os testes (cerca de 1 min e meio)
+.venv/bin/python -m pytest -m "not lento"  # sem os que leem o pacote do Inep
 ```
 
-Os 121 testes cobrem:
+**Os testes usam somente dados reais**, os mesmos do painel:
 
-- normalização, leitura de arquivos e duplicidades;
-- conciliação (incluindo casos ambíguos e decisões manuais);
-- indicadores e filtros;
-- códigos e bases escolares (formatos de 2024 e de 2025, MD5, cache de download);
-- persistência transacional (falha no meio da gravação preserva a versão anterior);
-- segurança;
-- mapas: orientação das malhas, agregação por município e destaque do município escolhido;
-- cartões: nomes legíveis, situação de cada pessoa e escola, ausência de dados de contato nos cartões;
-- renderização das sete páginas, galerias, gavetas e navegação entre município, escola e cursista, e o fluxo de importação
-  da demonstração.
+- as planilhas do cadastro e o texto da página de participantes do Moodle, na raiz do projeto (fora do
+  git);
+- uma cópia do banco do painel, feita numa pasta temporária (o banco original nunca é alterado);
+- o pacote de microdados do Inep em cache e as referências do IBGE (lista de municípios e malhas).
 
-Desempenho medido com cerca de 17,5 mil inscrições sintéticas:
+Nenhuma pessoa, escola ou registro é inventado. Quando um caso de erro precisa de uma variação (um
+e-mail malformado, uma coluna ausente, um e-mail repetido em outra pessoa), ela é derivada de um valor
+real. Os únicos textos fixos são especificações de formato, como "2 dias 3 horas". Sem os arquivos
+reais (por exemplo, numa cópia do repositório), os testes que dependem deles são ignorados.
+
+Privacidade na saída dos testes: as verificações sobre dados pessoais só informam contagens, e o pytest
+roda com `--assert=plain`; nenhum nome, e-mail ou CPF aparece na tela, nem em caso de falha.
+
+São 99 testes (98 aprovados e 1 ignorado: o da exportação do Catálogo de Escolas, que não foi
+fornecida). Eles cobrem:
+
+- leitura das planilhas e do texto do Moodle (valores preservados como vieram, mesmo conteúdo em CSV,
+  recusa de formatos incompatíveis);
+- normalização de cada e-mail, CPF, código INEP e IBGE, data e último acesso reais;
+- importação (problemas sinalizados conforme cada campo, CPF e data de nascimento nunca gravados) e
+  conciliação (e-mail inequívoco associa, nome apenas sugere, decisões manuais prevalecem);
+- persistência transacional, retenção, permissões do banco e da pasta de dados;
+- segurança (redação de logs, pseudonimização, mascaramento);
+- base escolar com o pacote oficial do Inep (MD5, etapas derivadas das matrículas, enriquecimento);
+- indicadores, faixas de acesso, filtros e mapas;
+- cartões de todas as pessoas e escolas reais, sem nenhum contato dentro deles;
+- as sete páginas abertas sobre a cópia do banco, as galerias, as gavetas e a navegação entre elas.
+
+Desempenho com os arquivos reais:
 
 | Etapa | Tempo |
 |---|---|
-| Validação do cadastro | 2,8 s |
-| Validação da atividade | 0,9 s |
-| Montagem da base analítica | 1,9 s, uma vez por versão dos dados (fica em cache) |
-| Cada interação com filtros e indicadores | 0,1 s |
+| Validação do cadastro (1.269 registros) | 2,8 s |
+| Validação da atividade (1.330 contas) | 0,2 s |
+| Montagem da base analítica | 1,0 s, uma vez por versão dos dados (fica em cache) |
+| Cada interação com filtros e indicadores | 0,07 s |
 
-O pipeline também foi conferido com os arquivos reais desta pasta, num banco temporário apagado em
-seguida, com impressão apenas de agregados:
+Resultado da importação dos arquivos reais:
 
 - **Cadastro:** 1.269 registros, todas as colunas reconhecidas e 4 sem código INEP.
 - **Atividade:** 1.330 contas, com 100% dos "últimos acessos" interpretados.
@@ -382,8 +405,6 @@ seguida, com impressão apenas de agregados:
   não reinterpreta o seu significado.
 - **Autenticação OIDC:** está implementada com o mecanismo nativo do Streamlit, mas não foi testada de
   ponta a ponta aqui, por falta de credenciais de um provedor institucional.
-- **Demonstração no Streamlit Community Cloud:** o armazenamento é efêmero e só pode haver dados
-  fictícios.
 - **SQLite:** atende a instalações pequenas, com um servidor e poucos administradores simultâneos.
 
 ## 12. O que falta para um ambiente institucional de produção

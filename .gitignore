@@ -32,9 +32,6 @@ data/*
 !data/README.md
 !data/referencias/
 !data/referencias/**
-!data/synthetic/
-data/synthetic/*
-!data/synthetic/README.md
 
 # Referência pública do IBGE (não contém dados pessoais) — permitida explicitamente
 !data/referencias/municipios_ibge.csv

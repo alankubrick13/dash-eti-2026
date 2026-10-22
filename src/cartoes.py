@@ -35,7 +35,8 @@ def _e(texto) -> str:
 
 
 def nome_legivel(texto) -> str:
-    """"MARIA DA SILVA" → "Maria da Silva"; "EMEF JOÃO XXIII" → "EMEF João XXIII". Texto em caixa mista fica como está."""
+    """Nome em caixa alta passa para caixa de título, só na tela: partículas ("da", "de", "e"…) em minúsculas,
+    siglas e algarismos romanos mantidos; as letras não mudam. Texto em caixa mista fica como está."""
     if eh_vazio(texto):
         return "—"
     texto = " ".join(str(texto).split())
@@ -51,29 +52,6 @@ def nome_legivel(texto) -> str:
         else:
             palavras.append("-".join(p[:1] + p[1:].lower() for p in palavra.split("-")))
     return " ".join(palavras)
-
-
-_PREFIXOS_ESCOLA = [(re.compile(padrao, re.IGNORECASE), sigla) for padrao, sigla in (
-    (r"^escola municipal de educa[cç][aã]o infantil e (ensino )?fundamental\b", "EMEIF"),
-    (r"^escola municipal de ensino infantil e fundamental\b", "EMEIF"),
-    (r"^escola municipal de ensino fundamental e m[eé]dio\b", "EMEFM"),
-    (r"^escola municipal de ensino fundamental\b", "EMEF"),
-    (r"^escola municipal de educa[cç][aã]o infantil\b", "EMEI"),
-    (r"^escola estadual de ensino fundamental e m[eé]dio\b", "EEEFM"),
-    (r"^escola estadual de ensino m[eé]dio\b", "EEEM"),
-    (r"^escola estadual de ensino fundamental\b", "EEEF"),
-)]
-
-
-def nome_curto_escola(texto) -> str:
-    """Nome para cartões: as designações longas e padronizadas viram a sigla de uso corrente
-    ("Escola Municipal de Ensino Fundamental Maria…" → "EMEF Maria…"), para o nome próprio aparecer."""
-    nome = nome_legivel(texto)
-    for padrao, sigla in _PREFIXOS_ESCOLA:
-        curto, trocas = padrao.subn(sigla, nome, count=1)
-        if trocas:
-            return curto
-    return nome
 
 
 def iniciais(nome) -> str:
@@ -171,7 +149,7 @@ def cartao_pessoa(pessoa, cores: dict[str, str]) -> str:
     motivo = motivo_curto(pessoa)
     linhas = ""
     if not eh_vazio(escola):
-        linhas += f'<div class="eti-cartao-linha">{_ICONE.format("school")}<span>{_e(nome_curto_escola(escola))}</span></div>'
+        linhas += f'<div class="eti-cartao-linha">{_ICONE.format("school")}<span>{_e(nome_legivel(escola))}</span></div>'
     if local:
         linhas += (f'<div class="eti-cartao-linha eti-1linha">{_ICONE.format("location_on")}'
                    f'<span>{_e(local)}</span></div>')
@@ -251,7 +229,7 @@ def cartao_escola(escola, faixas: list[str], cores: dict[str, str], com_local: b
                if com_local else "")
     return (
         f'<div class="eti-cartao eti-cartao-escola">{chamada}'
-        f'<div class="eti-cartao-titulo eti-3linhas">{_e(nome_curto_escola(escola.escola))}</div>'
+        f'<div class="eti-cartao-titulo eti-4linhas">{_e(nome_legivel(escola.escola))}</div>'
         f'<div class="eti-cartao-sub">{_e(detalhes)}</div>'
         f'<div class="eti-cartao-meio"><div class="eti-cartao-contagem">{pessoas} cursista{"s" if pessoas != 1 else ""}</div>'
         f'{pontos(faixas, cores)}</div>'

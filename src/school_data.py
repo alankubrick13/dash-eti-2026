@@ -28,13 +28,12 @@ import pandas as pd
 
 from . import config
 from .loaders import ErroImportacao, TabelaBruta, definir_campo, mapear_colunas
-from .normalization import classificar_inep, digitos_de_codigo, limpar_texto, unificar_categorias
+from .normalization import classificar_inep, digitos_de_codigo, eh_vazio, limpar_texto, unificar_categorias
 from .persistence import COLUNAS, agora_utc
 from .validators import grupos_de_duplicidade, resumo_problemas, tabela_problemas
 
 FONTE_MICRODADOS = "Microdados do Censo Escolar da Educação Básica (Inep)"
 FONTE_CATALOGO = "Catálogo de Escolas (Inep Data)"
-FONTE_SINTETICA = "Base escolar sintética no formato dos microdados (demonstração)"
 
 DEFINICAO_TEMPO_INTEGRAL = (
     "Segundo o dicionário de dados do Censo Escolar, considera-se em tempo integral a matrícula "
@@ -269,8 +268,12 @@ def ler_microdados(
 
 
 def _valor(linha: dict, var: str) -> str | None:
+    """Valor da célula como texto; célula vazia (inclusive NaN do leitor de CSV) fica None, nunca "nan"."""
     v = linha.get(var)
-    return None if v is None or (isinstance(v, str) and not v.strip()) else str(v).strip()
+    if eh_vazio(v):
+        return None
+    texto = str(v).strip()
+    return None if texto.lower() == "nan" else texto
 
 
 def _oferta(linha: dict, var: str) -> str | None:
@@ -425,7 +428,7 @@ def preparar_escolas(dados: pd.DataFrame, meta: dict, fonte: str, arquivos: list
     avisos = []
     if meta.get("md5_confere") is False:
         bloqueios.append("A soma MD5 do arquivo não confere com a publicada no pacote: o arquivo pode estar corrompido.")
-    if fonte != FONTE_SINTETICA and ano is None:
+    if ano is None:
         bloqueios.append("Não foi possível identificar o ano de referência da base escolar.")
     dados = dados.drop_duplicates("co_entidade").reset_index(drop=True)
     descricao = f"{fonte}, ano de referência {ano}" if ano else fonte

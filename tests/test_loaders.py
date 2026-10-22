@@ -1,8 +1,14 @@
+"""Leitura dos arquivos reais: planilhas do cadastro, texto do Moodle e recusa de formatos incompatíveis.
+
+As variações (CSV, extensão errada, pacote com macro) são feitas a partir dos próprios arquivos reais.
+"""
+
 import io
 import zipfile
 
 import openpyxl
 import pytest
+from conftest import confere, valores
 
 from src.loaders import (
     CAMPOS_ATIVIDADE,
@@ -14,120 +20,114 @@ from src.loaders import (
     listar_abas,
     mapear_colunas,
 )
+from src.normalization import eh_vazio, validar_cpf
 
 
-def _xlsx(linhas: list[list], aba: str = "Dados") -> bytes:
-    wb = openpyxl.Workbook()
-    ws = wb.active
-    ws.title = aba
-    for linha in linhas:
-        ws.append(linha)
-    buffer = io.BytesIO()
-    wb.save(buffer)
-    return buffer.getvalue()
+def _linhas_da_planilha(conteudo: bytes, aba: str) -> list[tuple]:
+    planilha = openpyxl.load_workbook(io.BytesIO(conteudo), read_only=True, data_only=True)
+    return [linha for linha in planilha[aba].iter_rows(values_only=True)]
 
 
-def test_xlsx_com_titulo_acima_do_cabecalho_e_tipos_preservados():
-    conteudo = _xlsx([
-        ["Relatório de inscrições"], [],
-        ["UF", "Nome", "E-mail", "CPF", "INEP", "Código local"],
-        ["PA", "ANA LIMA", "ana@mail.example", "012.345.678-90", 15012345, "00123"],
-    ])
-    t = ler_tabela("cadastro.xlsx", conteudo, CAMPOS_CADASTRO)
-    assert t.linha_cabecalho == 3
-    assert t.cabecalhos == ["UF", "Nome", "E-mail", "CPF", "INEP", "Código local"]
-    linha = t.dados.iloc[0]
-    assert linha["INEP"] == 15012345  # número do Excel preservado como veio; vira texto na normalização
-    assert linha["Código local"] == "00123"  # texto com zeros à esquerda intacto
-    assert linha["CPF"] == "012.345.678-90"
-    assert int(linha["__linha__"]) == 4  # linha real na planilha, para auditoria
+def test_planilhas_reais_lidas_com_todas_as_colunas(arquivos_cadastro, tabelas_cadastro):
+    for arquivo, tabela in zip(arquivos_cadastro, tabelas_cadastro):
+        mapa = mapear_colunas(tabela.cabecalhos, CAMPOS_CADASTRO)
+        confere(not mapa.faltando_obrigatorios and not mapa.nao_mapeadas, f"{arquivo.name}: coluna não reconhecida")
+        linhas = _linhas_da_planilha(arquivo.read_bytes(), tabela.aba)
+        com_dados = [l for l in linhas[tabela.linha_cabecalho:] if any(not eh_vazio(v) for v in l)]
+        confere(len(tabela.dados) == len(com_dados), f"{arquivo.name}: número de linhas difere da planilha")
+        numeros = tabela.dados["__linha__"].astype(int).tolist()
+        confere(numeros == sorted(numeros) and numeros[0] > tabela.linha_cabecalho,
+                f"{arquivo.name}: número de linha original não preservado")
 
 
-def test_xlsx_varias_abas():
-    wb = openpyxl.Workbook()
-    wb.active.title = "Resumo"
-    wb.create_sheet("Dados").append(["Nome", "E-mail"])
-    wb["Dados"].append(["ANA", "ana@mail.example"])
-    buffer = io.BytesIO()
-    wb.save(buffer)
-    assert listar_abas(buffer.getvalue()) == ["Resumo", "Dados"]
-    t = ler_tabela("x.xlsx", buffer.getvalue(), CAMPOS_CADASTRO, aba="Dados")
-    assert len(t.dados) == 1
+def test_valores_das_celulas_preservados_como_vieram(arquivos_cadastro, tabelas_cadastro):
+    divergencias = 0
+    for arquivo, tabela in zip(arquivos_cadastro, tabelas_cadastro):
+        linhas = _linhas_da_planilha(arquivo.read_bytes(), tabela.aba)
+        for coluna in ("INEP", "CPF", "CODIBGE"):
+            if coluna not in tabela.cabecalhos:
+                continue
+            j = tabela.cabecalhos.index(coluna)
+            for _, registro in tabela.dados.iterrows():
+                original = linhas[int(registro["__linha__"]) - 1][j]
+                lido = registro[coluna]
+                if not (eh_vazio(original) and eh_vazio(lido)) and str(original).strip() != str(lido).strip():
+                    divergencias += 1
+    confere(divergencias == 0, f"{divergencias} célula(s) real(is) alterada(s) na leitura")
 
 
-def test_csv_ponto_e_virgula_em_cp1252():
-    texto = "Nome;E-mail;INEP\nJOÃO SÉRGIO;joao@mail.example;13012345\n"
-    t = ler_tabela("cad.csv", texto.encode("cp1252"), CAMPOS_CADASTRO)
-    assert t.cabecalhos == ["Nome", "E-mail", "INEP"]
-    assert t.dados.iloc[0]["Nome"] == "JOÃO SÉRGIO"
-    assert t.dados.iloc[0]["INEP"] == "13012345"  # CSV: sempre texto
+def test_abas_das_planilhas_reais(arquivos_cadastro):
+    for arquivo in arquivos_cadastro:
+        nomes = openpyxl.load_workbook(io.BytesIO(arquivo.read_bytes()), read_only=True).sheetnames
+        assert listar_abas(arquivo.read_bytes()) == nomes
 
 
-def test_linhas_vazias_sao_ignoradas_e_conteudo_sem_cabecalho_avisado():
-    t = ler_tabela("cad.csv", "Nome,E-mail\nANA,ana@mail.example,extra\n,\n".encode(), CAMPOS_CADASTRO)
-    assert len(t.dados) == 1
-    assert any("sem cabeçalho" in a for a in t.avisos)
+def test_cadastro_real_em_csv(arquivos_cadastro, tabelas_cadastro):
+    """A mesma planilha exportada em CSV (ponto e vírgula, cp1252) dá o mesmo conteúdo."""
+    for arquivo, tabela in zip(arquivos_cadastro, tabelas_cadastro):
+        linhas = [";".join("" if eh_vazio(v) else str(v) for v in [*tabela.cabecalhos])]
+        for _, registro in tabela.dados.iterrows():
+            linhas.append(";".join("" if eh_vazio(registro[c]) else str(registro[c]) for c in tabela.cabecalhos))
+        texto = "\n".join(linhas) + "\n"
+        try:
+            conteudo = texto.encode("cp1252")
+        except UnicodeEncodeError:
+            conteudo = texto.encode("utf-8")
+        csv = ler_tabela(arquivo.with_suffix(".csv").name, conteudo, CAMPOS_CADASTRO)
+        assert csv.cabecalhos == tabela.cabecalhos
+        assert len(csv.dados) == len(tabela.dados)
+        inep_xlsx = ["" if eh_vazio(v) else str(v) for v in tabela.dados["INEP"]]
+        inep_csv = ["" if eh_vazio(v) else str(v) for v in csv.dados["INEP"]]
+        confere(inep_xlsx == inep_csv, f"{arquivo.name}: códigos INEP diferem entre XLSX e CSV")
 
 
-TEXTO_MOODLE = (
-    "\nDesmarcar todas as seleções\n"
-    "\tNomeOrdenar por Nome Ascendente / SobrenomeOrdenar por Sobrenome Ascendente\n"
-    "\tEndereço de emailOrdenar por Endereço de email Ascendente\n\tPapéis\n\tGrupos\n"
-    "\tÚltimo acesso ao cursoOrdenar por Último acesso ao curso Ascendente\n\tSituação\n"
-    "Selecione 'CARLA SOUZA'\n\tCARLA SOUZA\tcarla@mail.example\tEstudante\tPara 1\t3 dias 2 horas\t\nAtivo\n"
-    "Selecione 'PEDRO LIMA'\n\tPEDRO LIMA\tpedro@mail.example\tEstudante\tPara 1, Para 2\tNunca\t\nSuspenso\n"
-    "Selecione 'RITA ALVES'\n\tRITA ALVES\trita@formacao.example\tFormador (Tutor não editor)\t\t1 hora 5 minutos\t\nAtivo\n"
-    "Selecione 'SEM EMAIL'\n\tSEM EMAIL\tsem-email\tEstudante\tPara 3\t2 dias\t\nAtivo\n"
-)
+def test_texto_real_da_pagina_de_participantes(arquivo_atividade, tabela_atividade):
+    texto = arquivo_atividade.read_text(encoding="utf-8", errors="replace")
+    registros, _, nao_reconhecidas = ler_texto_participantes_moodle(texto)
+    blocos = texto.count("Selecione '")
+    confere(len(registros) + len(nao_reconhecidas) == blocos, "participante do texto real descartado em silêncio")
+    confere(all(len(r) == 6 and "@" in (r[1] or "") for r in registros), "registro do Moodle lido incompleto")
+    assert tabela_atividade.formato == "texto do Moodle"
+    assert len(tabela_atividade.dados) == len(registros)
+    assert not mapear_colunas(tabela_atividade.cabecalhos, CAMPOS_ATIVIDADE).faltando_obrigatorios
 
 
-def test_texto_copiado_da_pagina_de_participantes():
-    registros, origem, nao_reconhecidas = ler_texto_participantes_moodle(TEXTO_MOODLE)
-    assert [r[0] for r in registros] == ["CARLA SOUZA", "PEDRO LIMA", "RITA ALVES"]
-    assert registros[0][1:] == ["carla@mail.example", "Estudante", "Para 1", "3 dias 2 horas", "Ativo"]
-    assert registros[1][3:] == ["Para 1, Para 2", "Nunca", "Suspenso"]
-    assert registros[2][3] is None  # sem grupo
-    assert len(nao_reconhecidas) == 1  # linha com estrutura de participante sem e-mail: não é descartada em silêncio
-
-
-def test_ler_tabela_txt_do_moodle_avisa_linhas_nao_lidas():
-    t = ler_tabela("participantes.txt", TEXTO_MOODLE.encode(), CAMPOS_ATIVIDADE, permitidos=("txt",))
-    assert t.formato == "texto do Moodle"
-    assert len(t.dados) == 3
-    assert any("não foram lidas" in a for a in t.avisos)
-    mapa = mapear_colunas(t.cabecalhos, CAMPOS_ATIVIDADE)
-    assert not mapa.faltando_obrigatorios
-
-
-def test_mapeamento_de_cabecalhos_variantes_e_manual():
-    mapa = mapear_colunas(["Raça/Cor", "Endereço de e-mail", "NOME COMPLETO", "Cód. INEP", "Outra"], CAMPOS_CADASTRO)
-    assert mapa.original_para_interno == {"Raça/Cor": "raca_cor", "Endereço de e-mail": "email",
-                                          "NOME COMPLETO": "nome", "Cód. INEP": "inep"}
-    assert mapa.nao_mapeadas == ["Outra"]
-    manual = mapear_colunas(["Nome", "Correio"], CAMPOS_CADASTRO, manual={"email": "Correio"})
-    assert manual.original_para_interno["Correio"] == "email"
+def test_mapeamento_manual_com_os_cabecalhos_reais(tabelas_cadastro):
+    cabecalhos = tabelas_cadastro[0].cabecalhos
+    coluna_email = next(c for c, i in mapear_colunas(cabecalhos, CAMPOS_CADASTRO).original_para_interno.items()
+                        if i == "email")
+    renomeados = [f"{c} (coluna)" if c == coluna_email else c for c in cabecalhos]
+    assert mapear_colunas(renomeados, CAMPOS_CADASTRO).faltando_obrigatorios == ["E-mail"]
+    manual = mapear_colunas(renomeados, CAMPOS_CADASTRO, manual={"email": f"{coluna_email} (coluna)"})
     assert not manual.faltando_obrigatorios
-    assert mapear_colunas(["Nome"], CAMPOS_CADASTRO).faltando_obrigatorios == ["E-mail"]
 
 
-def test_rejeita_arquivos_incompativeis():
+def test_recusa_formatos_incompativeis(arquivos_cadastro, arquivo_atividade):
+    planilha = arquivos_cadastro[0].read_bytes()
     with pytest.raises(ErroImportacao, match="extensão"):
-        identificar_formato("planilha.xls", b"qualquer", ("xlsx", "csv"))
+        identificar_formato(arquivos_cadastro[0].with_suffix(".xls").name, planilha, ("xlsx", "csv"))
     with pytest.raises(ErroImportacao, match="assinatura"):
-        identificar_formato("falso.xlsx", b"isto nao e zip", ("xlsx",))
+        identificar_formato(arquivo_atividade.with_suffix(".xlsx").name, arquivo_atividade.read_bytes(), ("xlsx",))
     with pytest.raises(ErroImportacao, match="vazio"):
-        identificar_formato("vazio.csv", b"", ("csv",))
+        identificar_formato("cadastro.csv", b"", ("csv",))
     with pytest.raises(ErroImportacao, match="texto"):
-        identificar_formato("binario.csv", b"a\x00b", ("csv",))
+        identificar_formato(arquivos_cadastro[0].with_suffix(".csv").name, planilha, ("csv",))
+    # A mesma planilha com um projeto de macros acrescentado
     buffer = io.BytesIO()
-    with zipfile.ZipFile(buffer, "w") as zf:
-        zf.writestr("xl/workbook.xml", "<workbook/>")
-        zf.writestr("xl/vbaProject.bin", b"macro")
+    with zipfile.ZipFile(io.BytesIO(planilha)) as original, zipfile.ZipFile(buffer, "w") as nova:
+        for item in original.infolist():
+            nova.writestr(item, original.read(item))
+        nova.writestr("xl/vbaProject.bin", planilha[:512])
     with pytest.raises(ErroImportacao, match="macros"):
-        identificar_formato("macro.xlsx", buffer.getvalue(), ("xlsx",))
+        identificar_formato(arquivos_cadastro[0].name, buffer.getvalue(), ("xlsx",))
 
 
-def test_mensagens_de_erro_nao_repetem_conteudo_das_celulas():
-    with pytest.raises(ErroImportacao) as erro:
-        identificar_formato("dados.csv", "maria@mail.example;123.456.789-00\x00".encode(), ("csv",))
-    assert "maria" not in str(erro.value) and "123.456" not in str(erro.value)
+def test_mensagens_de_erro_nao_repetem_conteudo_real(tabelas_cadastro):
+    emails = valores(tabelas_cadastro, "email", CAMPOS_CADASTRO)[:20]
+    cpfs = [validar_cpf(c)[0] for c in valores(tabelas_cadastro, "cpf", CAMPOS_CADASTRO)[:20]]
+    vazou = 0
+    for email, cpf in zip(emails, cpfs):
+        with pytest.raises(ErroImportacao) as erro:
+            identificar_formato("dados.csv", f"{email};{cpf}\x00".encode(), ("csv",))
+        vazou += str(email) in str(erro.value) or str(cpf) in str(erro.value)
+    confere(vazou == 0, f"{vazou} mensagem(ns) de erro com conteúdo das células")

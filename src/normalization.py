@@ -118,7 +118,7 @@ def normalizar_email(valor) -> tuple[str | None, str]:
 def digitos_de_codigo(valor) -> tuple[str | None, bool]:
     """Converte um código lido da planilha em texto de dígitos.
 
-    Aceita número do Excel (13012345 ou 13012345.0) e separadores comuns
+    Aceita número do Excel (inteiro ou terminado em ".0") e separadores comuns
     (pontos, traços, barras, espaços). Retorna (texto, formato_ok); o texto é
     sempre string, para preservar zeros à esquerda.
     """
@@ -194,7 +194,8 @@ def validar_cpf(valor) -> tuple[str | None, str]:
 
     "valido_recomposto": a célula era numérica e perdeu zeros à esquerda no
     Excel; os zeros foram recompostos (CPF tem sempre 11 dígitos) e os
-    dígitos verificadores conferem.
+    dígitos verificadores conferem. Até quatro zeros: no cadastro real há CPFs
+    que começam com "000" e "0000".
     """
     if eh_vazio(valor):
         return None, "ausente"
@@ -203,7 +204,7 @@ def validar_cpf(valor) -> tuple[str | None, str]:
     if digitos is None or not formato_ok:
         return digitos, "invalido"
     recomposto = False
-    if numerico and 9 <= len(digitos) < 11:
+    if numerico and 7 <= len(digitos) < 11:
         digitos, recomposto = digitos.zfill(11), True
     if len(digitos) != 11 or digitos == digitos[0] * 11:
         return digitos, "invalido"

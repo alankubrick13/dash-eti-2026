@@ -1,15 +1,25 @@
-from datetime import date, datetime, timezone
+"""Normalização de e-mails, códigos, CPF, datas e último acesso, conferida nos dados reais.
 
-import pytest
+Cada verificação percorre os valores reais dos arquivos fornecidos. Variações (outra formatação do mesmo
+código, um dígito verificador trocado) são derivadas desses valores; nenhum dado é inventado.
+"""
 
+from datetime import date, datetime, timedelta, timezone
+from zoneinfo import ZoneInfo
+
+from conftest import FUSO, confere, quadro, valores
+
+from src.config import CODIGO_DA_SIGLA, NOME_DA_SIGLA
 from src.importacao import carregar_municipios
+from src.loaders import CAMPOS_ATIVIDADE, CAMPOS_CADASTRO
 from src.normalization import (
     chave_comparacao,
     classificar_ibge,
     classificar_inep,
-    digitos_de_codigo,
+    descrever_duracao,
     interpretar_data,
     interpretar_ultimo_acesso,
+    limpar_texto,
     normalizar_email,
     normalizar_uf,
     unificar_categorias,
@@ -17,129 +27,189 @@ from src.normalization import (
 )
 
 
-@pytest.mark.parametrize("valor, esperado", [
-    (" Maria.Silva@Correio.EXAMPLE ", ("maria.silva@correio.example", "valido")),
-    ("mailto:ana@escola.example", ("ana@escola.example", "valido")),
-    ("<jose@mail.example>", ("jose@mail.example", "valido")),
-    ("ana silva@mail.example", ("ana silva@mail.example", "invalido")),
-    ("ana@mail", ("ana@mail", "invalido")),
-    ("ana..souza@mail.example", ("ana..souza@mail.example", "invalido")),
-    ("ana@@mail.example", ("ana@@mail.example", "invalido")),
-    ("", (None, "ausente")),
-    (None, (None, "ausente")),
-])
-def test_normalizar_email(valor, esperado):
-    assert normalizar_email(valor) == esperado
+def _emails(tabelas_cadastro, tabela_atividade) -> list:
+    return valores(tabelas_cadastro, "email", CAMPOS_CADASTRO) + valores([tabela_atividade], "email", CAMPOS_ATIVIDADE)
 
 
-def test_codigos_preservam_zeros_e_sao_texto():
-    assert digitos_de_codigo("0012345") == ("0012345", True)
-    assert digitos_de_codigo(13012345) == ("13012345", True)
-    assert digitos_de_codigo(13012345.0) == ("13012345", True)
-    assert digitos_de_codigo("13012345.0") == ("13012345", True)
-    assert digitos_de_codigo("13.012.345") == ("13012345", True)
-    assert digitos_de_codigo("13A12345")[1] is False
+def test_emails_reais_normalizados(tabelas_cadastro, tabela_atividade):
+    brutos = _emails(tabelas_cadastro, tabela_atividade)
+    confere(len(brutos) > 1000, "poucos e-mails lidos dos arquivos reais")
+    inconsistentes = 0
+    for bruto in brutos:
+        email, status = normalizar_email(bruto)
+        if status != "valido":
+            continue
+        variantes = (f"  {bruto} ", str(bruto).upper(), f"mailto:{bruto}", f"<{bruto}>", email)
+        if email != email.lower() or any(normalizar_email(v) != (email, "valido") for v in variantes):
+            inconsistentes += 1
+    confere(inconsistentes == 0, f"{inconsistentes} e-mail(s) real(is) normalizado(s) de forma inconsistente")
 
 
-@pytest.mark.parametrize("valor, status", [
-    (13012345, "valido"), ("15012345", "valido"), ("13012345.0", "valido"), ("1301234", "invalido"),
-    ("99012345", "invalido"), ("ABC", "invalido"), (None, "ausente"), ("", "ausente"),
-])
-def test_classificar_inep(valor, status):
-    assert classificar_inep(valor)[1] == status
+def test_emails_reais_malformados_sao_invalidos(tabelas_cadastro, tabela_atividade):
+    validos = [e for e, s in map(normalizar_email, _emails(tabelas_cadastro, tabela_atividade)) if s == "valido"]
+    aceitos = 0
+    for email in validos:
+        local, dominio = email.split("@", 1)
+        defeitos = (email.replace("@", " @"), email.replace("@", "@@"), f"{local}@{dominio.split('.')[0]}",
+                    f"{local}..{local}@{dominio}")
+        aceitos += sum(normalizar_email(d)[1] == "valido" for d in defeitos)
+    confere(aceitos == 0, f"{aceitos} variação(ões) malformada(s) de e-mails reais aceita(s) como válida(s)")
 
 
-def test_classificar_ibge_com_lista_oficial():
+def test_codigos_inep_reais(tabelas_cadastro):
+    brutos = valores(tabelas_cadastro, "inep", CAMPOS_CADASTRO)
+    confere(len(brutos) > 1000, "poucos códigos INEP lidos")
+    problemas = validos = 0
+    for bruto in brutos:
+        codigo, status = classificar_inep(bruto)
+        if status != "valido":
+            continue
+        validos += 1
+        if not (isinstance(codigo, str) and len(codigo) == 8 and codigo.isdigit()):
+            problemas += 1
+        # O mesmo código escrito de outras formas (número do Excel, texto com ".0", com pontos)
+        for variante in (int(codigo), float(codigo), f"{codigo}.0", f"{codigo[:2]}.{codigo[2:5]}.{codigo[5:]}"):
+            problemas += classificar_inep(variante) != (codigo, "valido")
+        problemas += classificar_inep(codigo[:-1])[1] != "invalido"  # faltando um dígito
+    confere(validos > 0 and problemas == 0, f"{problemas} inconsistência(s) nos códigos INEP reais")
+
+
+def test_codigos_ibge_reais_contra_a_lista_oficial(tabelas_cadastro):
     municipios = carregar_municipios()
-    assert municipios is not None and len(municipios) > 5000
-    assert classificar_ibge(1302603, "AM", municipios) == ("1302603", "valido")  # Manaus
-    assert classificar_ibge("1302603", "PA", municipios)[1] == "uf_divergente"
-    assert classificar_ibge(13, "AM", municipios) == ("13", "valido")  # ente estadual
-    assert classificar_ibge("1399999", "AM", municipios)[1] == "inexistente"
-    assert classificar_ibge("123", "AM", municipios)[1] == "invalido"
-    assert classificar_ibge(None, "AM", municipios)[1] == "ausente"
+    confere(municipios is not None and len(municipios) > 5000, "lista oficial de municípios do IBGE indisponível")
+    dados = quadro(tabelas_cadastro, CAMPOS_CADASTRO)
+    siglas = sorted({normalizar_uf(u)[0] for u in dados["uf"] if normalizar_uf(u)[1] == "valido"})
+    problemas = municipais = 0
+    for bruto, uf in zip(dados["cod_ibge"], dados["uf"]):
+        sigla = normalizar_uf(uf)[0]
+        codigo, status = classificar_ibge(bruto, sigla, municipios)
+        if status != "valido":
+            continue
+        if len(codigo) == 7:
+            municipais += 1
+            problemas += codigo not in municipios or municipios[codigo][1] != sigla
+        outra = next((s for s in siglas if s != sigla), None)
+        if outra:
+            problemas += classificar_ibge(bruto, outra, municipios)[1] != "uf_divergente"
+    # Código de 7 dígitos com prefixo de UF real, mas ausente da lista oficial
+    for sigla in siglas:
+        prefixo = CODIGO_DA_SIGLA[sigla]
+        ausente = next(f"{prefixo}{n:05d}" for n in range(99999, 0, -1) if f"{prefixo}{n:05d}" not in municipios)
+        problemas += classificar_ibge(ausente, sigla, municipios)[1] != "inexistente"
+    confere(municipais > 0 and problemas == 0, f"{problemas} inconsistência(s) nos códigos IBGE reais")
 
 
-def test_normalizar_uf():
-    assert normalizar_uf(" pa ") == ("PA", "valido")
-    assert normalizar_uf("Pará") == ("PA", "valido")
-    assert normalizar_uf("Amapá") == ("AP", "valido")
-    assert normalizar_uf("XX")[1] == "invalido"
+def test_ufs_reais(tabelas_cadastro):
+    problemas = 0
+    for bruto in valores(tabelas_cadastro, "uf", CAMPOS_CADASTRO):
+        sigla, status = normalizar_uf(bruto)
+        if status != "valido":
+            continue
+        for variante in (str(bruto).lower(), f" {bruto} ", NOME_DA_SIGLA[sigla], NOME_DA_SIGLA[sigla].upper()):
+            problemas += normalizar_uf(variante) != (sigla, "valido")
+    confere(problemas == 0, f"{problemas} inconsistência(s) na leitura das UFs reais")
 
 
-def _cpf_com_dv(base9: str) -> str:
-    digitos = [int(c) for c in base9]
-    for n in (9, 10):
-        soma = sum(d * (n + 1 - i) for i, d in enumerate(digitos))
-        digitos.append((soma * 10) % 11 % 10)
-    return "".join(map(str, digitos))
+def test_cpfs_reais(tabelas_cadastro):
+    brutos = valores(tabelas_cadastro, "cpf", CAMPOS_CADASTRO)
+    confere(len(brutos) > 1000, "poucos CPFs lidos")
+    problemas = validos = 0
+    for bruto in brutos:
+        digitos, status = validar_cpf(bruto)
+        if status not in ("valido", "valido_recomposto"):
+            continue
+        validos += 1
+        formatado = f"{digitos[:3]}.{digitos[3:6]}.{digitos[6:9]}-{digitos[9:]}"
+        problemas += validar_cpf(formatado) != (digitos, "valido")
+        problemas += validar_cpf(digitos[:-1] + str((int(digitos[-1]) + 1) % 10))[1] != "invalido"
+        if digitos.startswith("0"):
+            # Célula numérica do Excel que perdeu o zero à esquerda: recomposta; texto com 10 dígitos, não
+            problemas += validar_cpf(int(digitos)) != (digitos, "valido_recomposto")
+            problemas += validar_cpf(digitos[1:])[1] != "invalido"
+    confere(validos > 0 and problemas == 0, f"{problemas} inconsistência(s) na validação dos CPFs reais")
 
 
-def test_validar_cpf():
-    valido = _cpf_com_dv("123456789")
-    assert validar_cpf(f"{valido[:3]}.{valido[3:6]}.{valido[6:9]}-{valido[9:]}") == (valido, "valido")
-    assert validar_cpf("111.111.111-11")[1] == "invalido"
-    assert validar_cpf(valido[:-1] + str((int(valido[-1]) + 1) % 10))[1] == "invalido"
-    assert validar_cpf(None)[1] == "ausente"
-    # Célula numérica do Excel que perdeu o zero à esquerda
-    com_zero = _cpf_com_dv("012345678")
-    assert validar_cpf(int(com_zero)) == (com_zero, "valido_recomposto")
-    # Texto com 10 dígitos não é recomposto (não há como saber que era número)
-    assert validar_cpf(com_zero[1:])[1] == "invalido"
+def test_datas_reais(tabelas_cadastro):
+    problemas = validas = 0
+    for campo in ("data_resposta", "data_nascimento"):
+        for bruto in valores(tabelas_cadastro, campo, CAMPOS_CADASTRO):
+            data, status = interpretar_data(bruto)
+            if status != "valida":
+                continue
+            validas += 1
+            variantes = [data.strftime("%d/%m/%Y"), data.isoformat(), f"{data.isoformat()} 00:00:00",
+                         datetime.combine(data, datetime.min.time())]
+            serial = (data - date(1899, 12, 30)).days
+            if 20000 <= serial <= 80000:  # número de série do Excel
+                variantes.append(serial)
+            problemas += sum(interpretar_data(v) != (data, "valida") for v in variantes)
+            problemas += interpretar_data(f"31/02/{data.year}") != (None, "invalida")  # dia inexistente
+    confere(validas > 0 and problemas == 0, f"{problemas} inconsistência(s) na leitura das datas reais")
 
 
-@pytest.mark.parametrize("valor, esperado", [
-    ("14/08/2026", date(2026, 8, 14)), ("2026-08-14", date(2026, 8, 14)),
-    ("2026-08-14 00:00:00", date(2026, 8, 14)), (datetime(2026, 8, 14, 9, 0), date(2026, 8, 14)),
-    (46248, date(2026, 8, 14)),
-])
-def test_interpretar_data_valida(valor, esperado):
-    assert interpretar_data(valor) == (esperado, "valida")
+def test_ultimo_acesso_real_interpretado_sem_inventar_datas(tabela_atividade):
+    textos = valores([tabela_atividade], "ultimo_acesso", CAMPOS_ATIVIDADE)
+    confere(len(textos) > 1000, "poucos registros de último acesso lidos")
+    acessos = [interpretar_ultimo_acesso(t) for t in textos]
+    confere(all(a.tipo != "nao_interpretado" for a in acessos), "há último acesso real não interpretado")
+    relativos = [a for a in acessos if a.tipo == "relativo"]
+    confere(all(a.duracao_s >= 0 and a.momento is None for a in relativos),
+            "tempo relativo virou data sem a data de exportação")
+    # Descrever e reler o tempo devolve o mesmo valor (a descrição do painel não mostra segundos)
+    confere(all(interpretar_ultimo_acesso(descrever_duracao(a.duracao_s)).duracao_s == a.duracao_s - a.duracao_s % 60
+                for a in relativos if a.duracao_s >= 60), "descrição do tempo sem acesso não confere")
 
 
-def test_interpretar_data_invalida_ou_ausente():
-    assert interpretar_data("31/02/1980") == (None, "invalida")
-    assert interpretar_data("1980-13-01") == (None, "invalida")
-    assert interpretar_data(None) == (None, "ausente")
+def test_nomes_reais_nao_sao_confundidos_com_tempo(tabelas_cadastro, tabela_atividade):
+    nomes = valores(tabelas_cadastro, "nome", CAMPOS_CADASTRO) + valores([tabela_atividade], "nome_completo", CAMPOS_ATIVIDADE)
+    confundidos = sum(interpretar_ultimo_acesso(n).tipo != "nao_interpretado" for n in nomes)
+    confere(confundidos == 0, f"{confundidos} nome(s) real(is) lido(s) como tempo de acesso")
 
 
-@pytest.mark.parametrize("texto, segundos", [
-    ("1 hora 33 minutos", 5580), ("1 hora e 33 minutos", 5580), ("14 dias 22 horas", 14 * 86400 + 22 * 3600),
-    ("2 dias", 2 * 86400), ("1 dia", 86400), ("23 minutos 5 segundos", 23 * 60 + 5),
-    ("3 days 2 hours", 3 * 86400 + 7200), ("1 ano 15 dias", 365 * 86400 + 15 * 86400), ("agora", 0),
-])
-def test_ultimo_acesso_relativo(texto, segundos):
-    acesso = interpretar_ultimo_acesso(texto)
-    assert acesso.tipo == "relativo" and acesso.duracao_s == segundos and acesso.momento is None
+def test_formatos_de_tempo_do_moodle():
+    """Especificação de formato (como o Moodle escreve o tempo), não registros."""
+    casos = {"1 hora 33 minutos": 5580, "1 hora e 33 minutos": 5580, "14 dias 22 horas": 14 * 86400 + 22 * 3600,
+             "2 dias": 2 * 86400, "23 minutos 5 segundos": 23 * 60 + 5, "3 days 2 hours": 3 * 86400 + 7200,
+             "1 ano 15 dias": 380 * 86400, "agora": 0}
+    for texto, segundos in casos.items():
+        acesso = interpretar_ultimo_acesso(texto)
+        assert (acesso.tipo, acesso.duracao_s, acesso.momento) == ("relativo", segundos, None), texto
+    assert interpretar_ultimo_acesso("Nunca").tipo == interpretar_ultimo_acesso("never").tipo == "nunca"
+    assert interpretar_ultimo_acesso("").tipo == interpretar_ultimo_acesso(None).tipo == "vazio"
 
 
-def test_ultimo_acesso_sem_informacao_nao_vira_data():
-    assert interpretar_ultimo_acesso("Nunca").tipo == "nunca"
-    assert interpretar_ultimo_acesso("never").tipo == "nunca"
-    assert interpretar_ultimo_acesso("").tipo == "vazio"
-    assert interpretar_ultimo_acesso(None).tipo == "vazio"
-    # Sobrenomes com "dias"/"mes" não podem ser confundidos com tempo
-    assert interpretar_ultimo_acesso("DIAS").tipo == "nao_interpretado"
-    assert interpretar_ultimo_acesso("MESQUITA DIAS").tipo == "nao_interpretado"
+def test_data_absoluta_usa_o_fuso(arquivo_atividade):
+    # Momento real: quando o arquivo da plataforma foi salvo neste computador
+    momento = datetime.fromtimestamp(arquivo_atividade.stat().st_mtime, ZoneInfo(FUSO)).replace(second=0, microsecond=0)
+    esperado = momento.astimezone(timezone.utc)
+    assert interpretar_ultimo_acesso(momento.strftime("%d/%m/%Y %H:%M"), FUSO).momento == esperado
+    manaus = momento.replace(tzinfo=ZoneInfo("America/Manaus"))
+    assert interpretar_ultimo_acesso(momento.strftime("%d/%m/%Y %H:%M"), "America/Manaus").momento == manaus.astimezone(timezone.utc)
+    assert interpretar_ultimo_acesso(esperado.strftime("%Y-%m-%dT%H:%M:%SZ")).momento == esperado
+    assert esperado - timedelta(days=1) < datetime.now(timezone.utc)
 
 
-def test_ultimo_acesso_absoluto_usa_fuso():
-    acesso = interpretar_ultimo_acesso("15/10/2024 14:32", "America/Sao_Paulo")
-    assert acesso.tipo == "absoluto"
-    assert acesso.momento == datetime(2024, 10, 15, 17, 32, tzinfo=timezone.utc)
-    manaus = interpretar_ultimo_acesso("15/10/2024 14:32", "America/Manaus")
-    assert manaus.momento == datetime(2024, 10, 15, 18, 32, tzinfo=timezone.utc)
-    extenso = interpretar_ultimo_acesso("terça-feira, 15 out 2024, 14:32", "America/Sao_Paulo")
-    assert extenso.tipo == "absoluto" and extenso.momento == acesso.momento
-    assert interpretar_ultimo_acesso("2024-10-15T17:32:00Z").momento == acesso.momento
+def test_categorias_reais_unificadas_pela_grafia_da_fonte(tabelas_cadastro):
+    problemas = 0
+    for campo in ("situacao", "tipo", "origem", "escolaridade", "cargo_funcao"):
+        brutos = [b for b in valores(tabelas_cadastro, campo, CAMPOS_CADASTRO) if isinstance(b, str)]
+        if not brutos:
+            continue
+        variantes = [b.lower() for b in brutos[:10]] + [f" {b.upper()} " for b in brutos[:10]]
+        unificadas = unificar_categorias(brutos + variantes)
+        originais = {limpar_texto(b) for b in brutos}
+        problemas += not set(unificadas) <= originais  # nenhuma grafia nova é criada
+        por_chave = {}
+        for valor in unificadas:
+            por_chave.setdefault(chave_comparacao(valor), set()).add(valor)
+        problemas += sum(len(v) > 1 for v in por_chave.values())
+    confere(problemas == 0, f"{problemas} inconsistência(s) na unificação das categorias reais")
 
 
-def test_unificar_categorias_preserva_grafia_mais_comum():
-    assert unificar_categorias(["Aceitou", "aceitou ", "ACEITOU", "Aceitou", None, " "]) == [
-        "Aceitou", "Aceitou", "Aceitou", "Aceitou", None, None]
-    assert unificar_categorias(["Especialização", "Especializacao", "Especializacao"])[0] == "Especializacao"
-
-
-def test_chave_comparacao():
-    assert chave_comparacao("  Maria  da Conceição ") == "maria da conceicao"
-    assert chave_comparacao(None) is None
+def test_chave_de_comparacao_dos_nomes_reais(tabelas_cadastro):
+    problemas = 0
+    for nome in valores(tabelas_cadastro, "nome", CAMPOS_CADASTRO):
+        chave = chave_comparacao(nome)
+        problemas += not (chave and chave == chave.lower() and "  " not in chave and chave.isascii())
+        problemas += chave_comparacao(chave) != chave or chave_comparacao(f"  {str(nome).lower()} ") != chave
+    confere(problemas == 0, f"{problemas} inconsistência(s) na chave de comparação dos nomes reais")

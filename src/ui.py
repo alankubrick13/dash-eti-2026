@@ -107,14 +107,15 @@ def cabecalho(cfg, base) -> None:
     marca_html = f'<div class="eti-marca-bloco">{marca}</div>' if marca else ""
     programa = "" if marca else f'<div class="eti-programa">{html.escape(config.NOME_PROGRAMA)}</div>'
     territorio = recorte_territorial(base)
-    demo = ('<div class="eti-demo">Demonstração com dados fictícios. Nenhuma informação corresponde a '
-            'pessoas ou escolas reais.</div>') if cfg.demonstracao else ""
+    modo = ('<div class="eti-modo"><span class="eti-icone" aria-hidden="true">verified_user</span>'
+            + ("Dados reais · uso local neste computador" if cfg.ambiente == "local" else "Dados reais · acesso autenticado")
+            + "</div>")
     st.html(
         f'<header class="eti-cabecalho">{marca_html}<div class="eti-identidade">{programa}'
         f'<div class="eti-ferramenta">{html.escape(config.NOME_FERRAMENTA)}</div>'
         + (f'<div class="eti-territorio">{html.escape(territorio)}</div>' if territorio else "")
-        + f'<div class="eti-natureza">{html.escape(config.AVISO_NATUREZA)}</div></div>'
-        f'<div class="eti-refs">{referencias}</div></header>{demo}'
+        + f'<div class="eti-natureza">{html.escape(config.AVISO_NATUREZA)}</div>{modo}</div>'
+        f'<div class="eti-refs">{referencias}</div></header>'
     )
 
 

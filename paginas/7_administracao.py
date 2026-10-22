@@ -7,7 +7,7 @@ from zoneinfo import ZoneInfo
 import pandas as pd
 import streamlit as st
 
-from src import config, importacao, metrics, painel, school_data, synthetic, ui
+from src import config, importacao, metrics, painel, school_data, ui
 from src.loaders import CAMPOS_ATIVIDADE, CAMPOS_CADASTRO, ErroImportacao, listar_abas, ler_tabela
 from src.security import configurar_logging
 
@@ -22,37 +22,8 @@ ui.titulo_pagina(
     "depois de confirmada; se a gravação falhar, a versão anterior continua valendo. Os arquivos originais "
     "nunca são alterados.",
 )
-demo = ctx.cfg.demonstracao
-if demo:
-    st.info(
-        "Demonstração: o envio de arquivos está desativado para que nenhum dado real seja carregado em ambiente "
-        "público. Experimente o fluxo com os arquivos fictícios abaixo; as alterações valem só para esta sessão.",
-        icon=":material/info:",
-    )
-
-OPCOES_DEMO = {
-    "cadastro": {
-        "Cadastro atualizado, com entradas e saídas (fictício)": ["cadastro_atualizacao"],
-        "Cadastro sem a coluna de e-mail (erro estrutural, fictício)": ["cadastro_sem_email"],
-        "Cadastro original e lista de novos inscritos (fictícios)": ["cadastro", "cadastro_novos"],
-    },
-    "atividade": {
-        "Nova exportação de participantes, 5 dias depois (fictícia)": ["atividade_nova"],
-        "Exportação original de participantes (fictícia)": ["atividade"],
-    },
-}
-REFERENCIAS_DEMO = {"atividade_nova": synthetic.REFERENCIA_NOVA_EXPORTACAO, "atividade": synthetic.REFERENCIA_EXPORTACAO}
 ROTULOS_CADASTRO = {c.nome: c.rotulo for c in CAMPOS_CADASTRO}
 ROTULOS_ATIVIDADE = {c.nome: c.rotulo for c in CAMPOS_ATIVIDADE}
-
-
-def _arquivos_demo(fonte: str) -> tuple[list[tuple[str, bytes]], str]:
-    from src.ambiente import arquivos_demonstracao
-
-    caminhos = arquivos_demonstracao()
-    escolha = st.radio("Arquivos fictícios", list(OPCOES_DEMO[fonte]), key=f"demo_{fonte}")
-    chaves = OPCOES_DEMO[fonte][escolha]
-    return [(caminhos[k].name, caminhos[k].read_bytes()) for k in chaves], chaves[0]
 
 
 def _arquivos_enviados(fonte: str, tipos: list[str], multiplos: bool) -> list[tuple[str, bytes]]:
@@ -204,14 +175,11 @@ def _mapeamento_manual(fonte: str, previa: importacao.Previa, campos) -> dict | 
 
 
 def _fluxo(fonte: str, campos, permitidos: tuple[str, ...], preparar) -> None:
-    if demo:
-        arquivos, chave_demo = _arquivos_demo(fonte)
-    else:
-        arquivos, chave_demo = _arquivos_enviados(fonte, list(permitidos), multiplos=True), None
+    arquivos = _arquivos_enviados(fonte, list(permitidos), multiplos=True)
     if not arquivos:
         return
     abas = _seletor_abas(arquivos)
-    extras = preparar_extras(fonte, chave_demo)
+    extras = preparar_extras(fonte)
     estado = st.session_state.get(f"previa_{fonte}")
     assinatura = _assinatura(arquivos) + repr(sorted(abas.items())) + repr(extras)
     if st.button("Validar arquivos", key=f"validar_{fonte}"):
@@ -236,26 +204,21 @@ def _fluxo(fonte: str, campos, permitidos: tuple[str, ...], preparar) -> None:
     _confirmacao(fonte, previa)
 
 
-def preparar_extras(fonte: str, chave_demo: str | None) -> dict:
+def preparar_extras(fonte: str) -> dict:
     """Entradas adicionais da importação de atividade: data e hora da exportação."""
     if fonte != "atividade":
         return {}
     fuso = ctx.cfg.fuso_horario
-    padrao = REFERENCIAS_DEMO.get(chave_demo) if chave_demo else None
     informar = st.checkbox(
-        "Informar a data e a hora da exportação", value=padrao is not None, key="atividade_informar_ref",
+        "Informar a data e a hora da exportação", value=False, key="atividade_informar_ref",
         help="Necessária para converter tempos relativos (“3 dias 2 horas”) em datas. Sem ela, o painel mostra "
              "o tempo sem acesso no momento da exportação, sem inventar datas.",
     )
     if not informar:
         return {"referencia": None}
     c1, c2 = st.columns(2)
-    dia = c1.date_input("Data da exportação", value=padrao.date() if padrao else None, format="DD/MM/YYYY",
-                        key="atividade_data_ref")
-    hora = c2.time_input("Hora da exportação", value=padrao.time() if padrao else time(12, 0), key="atividade_hora_ref",
-                         step=300)
-    if padrao:
-        ui.nota("Valor da demonstração preenchido automaticamente.")
+    dia = c1.date_input("Data da exportação", value=None, format="DD/MM/YYYY", key="atividade_data_ref")
+    hora = c2.time_input("Hora da exportação", value=time(12, 0), key="atividade_hora_ref", step=300)
     ui.nota(f"Fuso horário: {fuso}.")
     if not dia:
         return {"referencia": None}
@@ -307,9 +270,8 @@ with abas[2]:
     codigos = set(cursistas.loc[cursistas["inep_status"] == "valido", "inep"])
     # UFs do cadastro e das próprias escolas (o código INEP começa pelo código da UF)
     ufs = set(cursistas["uf"].dropna()) | {config.UFS[c[:2]][0] for c in codigos}
-    opcoes = (["Base fictícia da demonstração"] if demo else []) + [
-        "Baixar microdados oficiais do Inep", "Importar pacote de microdados já baixado (ZIP ou CSV)",
-        "Importar exportação do Catálogo de Escolas (XLSX ou CSV)"]
+    opcoes = ["Baixar microdados oficiais do Inep", "Importar pacote de microdados já baixado (ZIP ou CSV)",
+              "Importar exportação do Catálogo de Escolas (XLSX ou CSV)"]
     modo = st.radio("Origem da base escolar", opcoes, key="escolas_modo")
     estado_escolas = st.session_state.get("previa_escolas", {})
     previa = estado_escolas.get("previa") if estado_escolas.get("modo") == modo else None
@@ -318,62 +280,44 @@ with abas[2]:
         st.session_state["previa_escolas"] = {"modo": modo, "previa": previa_nova}
 
     try:
-        if modo == "Base fictícia da demonstração":
-            if st.button("Processar base fictícia"):
-                from src.ambiente import arquivos_demonstracao
-
-                caminho = arquivos_demonstracao()["escolas"]
-                dados, info = school_data.ler_microdados(caminho.read_bytes(), caminho.name, codigos, ufs)
+        if modo == "Baixar microdados oficiais do Inep":
+            ano = st.selectbox("Ano do Censo Escolar", sorted(config.URLS_MICRODADOS_INEP, reverse=True))
+            st.caption(f"Endereço oficial: {config.URLS_MICRODADOS_INEP[ano]}")
+            if st.button("Baixar (ou usar cópia em cache) e processar"):
+                barra = st.progress(0.0, text="Baixando o pacote oficial…")
+                caminho, info_download = school_data.baixar_microdados(
+                    ano, ctx.cfg.dir_dados / "cache_inep", lambda p: barra.progress(p, text="Baixando o pacote oficial…"))
+                barra.progress(1.0, text="Lendo o arquivo de escolas…")
+                dados, info = school_data.ler_microdados(caminho, caminho.name, codigos, ufs)
+                info["download"] = info_download
                 previa = school_data.preparar_escolas(school_data.normalizar_microdados(dados), info,
-                                                      school_data.FONTE_SINTETICA, [{"arquivo": caminho.name}])
+                                                      school_data.FONTE_MICRODADOS,
+                                                      [{"arquivo": caminho.name, "publicado_em": info_download.get("publicado_em")}],
+                                                      url=info_download.get("url"))
+                barra.empty()
                 guardar(previa)
-        elif modo == "Baixar microdados oficiais do Inep":
-            if demo:
-                ui.nota("Desativado na demonstração.")
-            else:
-                ano = st.selectbox("Ano do Censo Escolar", sorted(config.URLS_MICRODADOS_INEP, reverse=True))
-                st.caption(f"Endereço oficial: {config.URLS_MICRODADOS_INEP[ano]}")
-                if st.button("Baixar (ou usar cópia em cache) e processar"):
-                    barra = st.progress(0.0, text="Baixando o pacote oficial…")
-                    caminho, info_download = school_data.baixar_microdados(
-                        ano, ctx.cfg.dir_dados / "cache_inep", lambda p: barra.progress(p, text="Baixando o pacote oficial…"))
-                    barra.progress(1.0, text="Lendo o arquivo de escolas…")
-                    dados, info = school_data.ler_microdados(caminho, caminho.name, codigos, ufs)
-                    info["download"] = info_download
-                    previa = school_data.preparar_escolas(school_data.normalizar_microdados(dados), info,
-                                                          school_data.FONTE_MICRODADOS,
-                                                          [{"arquivo": caminho.name, "publicado_em": info_download.get("publicado_em")}],
-                                                          url=info_download.get("url"))
-                    barra.empty()
-                    guardar(previa)
         elif modo == "Importar pacote de microdados já baixado (ZIP ou CSV)":
-            if demo:
-                ui.nota("Desativado na demonstração.")
-            else:
-                enviado = st.file_uploader("Pacote de microdados", type=["zip", "csv"], key="envio_microdados")
-                if enviado and st.button("Processar pacote"):
-                    from src.loaders import identificar_formato
+            enviado = st.file_uploader("Pacote de microdados", type=["zip", "csv"], key="envio_microdados")
+            if enviado and st.button("Processar pacote"):
+                from src.loaders import identificar_formato
 
-                    conteudo = enviado.getvalue()
-                    identificar_formato(enviado.name, conteudo, ("zip", "csv"))
-                    dados, info = school_data.ler_microdados(conteudo, enviado.name, codigos, ufs)
-                    previa = school_data.preparar_escolas(school_data.normalizar_microdados(dados), info,
-                                                          school_data.FONTE_MICRODADOS, [{"arquivo": enviado.name}])
-                    guardar(previa)
+                conteudo = enviado.getvalue()
+                identificar_formato(enviado.name, conteudo, ("zip", "csv"))
+                dados, info = school_data.ler_microdados(conteudo, enviado.name, codigos, ufs)
+                previa = school_data.preparar_escolas(school_data.normalizar_microdados(dados), info,
+                                                      school_data.FONTE_MICRODADOS, [{"arquivo": enviado.name}])
+                guardar(previa)
         else:
-            if demo:
-                ui.nota("Desativado na demonstração.")
-            else:
-                enviado = st.file_uploader("Exportação do Catálogo de Escolas", type=["xlsx", "csv"], key="envio_catalogo")
-                ano_ref = st.number_input("Ano de referência (Censo Escolar) indicado no Catálogo", min_value=2007,
-                                          max_value=datetime.now().year, value=None, step=1)
-                if enviado and ano_ref and st.button("Processar exportação"):
-                    tabela = ler_tabela(enviado.name, enviado.getvalue(), school_data.CAMPOS_CATALOGO)
-                    dados, info = school_data.normalizar_catalogo(tabela, int(ano_ref))
-                    previa = school_data.preparar_escolas(dados, info, school_data.FONTE_CATALOGO, [tabela.metadados()])
-                    guardar(previa)
-                ui.nota("No Catálogo (Inep Data), filtre as UFs desejadas e exporte a tabela. O ano de referência "
-                        "deve ser informado conforme exibido no próprio Catálogo; o painel não o presume.")
+            enviado = st.file_uploader("Exportação do Catálogo de Escolas", type=["xlsx", "csv"], key="envio_catalogo")
+            ano_ref = st.number_input("Ano de referência (Censo Escolar) indicado no Catálogo", min_value=2007,
+                                      max_value=datetime.now().year, value=None, step=1)
+            if enviado and ano_ref and st.button("Processar exportação"):
+                tabela = ler_tabela(enviado.name, enviado.getvalue(), school_data.CAMPOS_CATALOGO)
+                dados, info = school_data.normalizar_catalogo(tabela, int(ano_ref))
+                previa = school_data.preparar_escolas(dados, info, school_data.FONTE_CATALOGO, [tabela.metadados()])
+                guardar(previa)
+            ui.nota("No Catálogo (Inep Data), filtre as UFs desejadas e exporte a tabela. O ano de referência "
+                    "deve ser informado conforme exibido no próprio Catálogo; o painel não o presume.")
     except ErroImportacao as exc:
         st.error(str(exc))
     if previa is not None:
