@@ -184,3 +184,7 @@ def test_painel_sem_banco_le_os_arquivos_da_pasta_sozinho(monkeypatch, tmp_path,
     textos = " ".join(h.proto.body for h in teste.get("html"))
     confere("Nenhuma planilha do cadastro" not in textos, "o painel não leu as planilhas da pasta")
     confere(len(_cartoes(teste)) == 24, "a galeria não mostrou os cursistas lidos da pasta")
+    # Ao ler arquivos novos, o painel gera a versão publicada, na pasta configurada (nunca na real, nos testes)
+    import os
+
+    assert (Path(os.environ["ETI_PASTA_PUBLICADA"]) / "eti.sqlite3").exists()

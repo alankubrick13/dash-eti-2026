@@ -73,6 +73,13 @@ def valores(tabelas, campo: str, campos) -> list:
     return [v for v in dados[campo].tolist() if not eh_vazio(v)] if campo in dados else []
 
 
+@pytest.fixture(autouse=True)
+def _versao_publicada_isolada(tmp_path, monkeypatch):
+    """Nenhum teste grava na versão publicada real (data/publicado): o painel aberto pelos testes usa outra pasta."""
+    if "ETI_PASTA_PUBLICADA" not in os.environ:
+        monkeypatch.setenv("ETI_PASTA_PUBLICADA", str(tmp_path / "publicado_do_teste"))
+
+
 @pytest.fixture(scope="session")
 def arquivos_cadastro() -> list[Path]:
     if not ARQUIVOS_CADASTRO:
