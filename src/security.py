@@ -16,9 +16,6 @@ import secrets
 from dataclasses import dataclass
 from pathlib import Path
 
-ENDERECOS_LOCAIS = {"localhost", "127.0.0.1", "::1"}
-
-
 # ---------------------------------------------------------------- pseudonimização
 
 
@@ -145,12 +142,6 @@ def oidc_configurado() -> bool:
         return False
 
 
-def servidor_em_endereco_local() -> bool:
-    import streamlit as st
-
-    return (st.get_option("server.address") or "").strip() in ENDERECOS_LOCAIS
-
-
 def _dados_usuario_oidc() -> dict:
     import streamlit as st
 
@@ -199,13 +190,8 @@ def resolver_usuario(cfg) -> Usuario:
             "oidc",
         )
 
-    if cfg.ambiente == "local" and cfg.permitir_local_sem_login:
-        if not servidor_em_endereco_local():
-            ui.tela_configuracao_pendente(
-                "O acesso local sem login só é permitido com o servidor ligado em localhost. "
-                "Inicie com: streamlit run app.py --server.address localhost"
-            )
-            st.stop()
+    if cfg.ambiente == "local":
+        # Uso local: o painel abre direto, sem tela de login ou de configuração
         nome = getpass.getuser()
         return Usuario(f"local:{nome}", nome, True, True, "local")
 

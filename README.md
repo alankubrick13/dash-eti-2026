@@ -51,16 +51,15 @@ O modo é definido pela variável `ETI_AMBIENTE`, que pode estar no ambiente, nu
 
 | Modo | Para quê | Dados | Login |
 |---|---|---|---|
-| `local` (padrão) | Uso num computador confiável | Reais, em `data/privado/` (fora do git) | OIDC; ou dispensado apenas com servidor em `localhost` |
+| `local` (padrão) | Uso num computador confiável | Reais, em `data/privado/` (fora do git) | Não exige: o painel abre direto |
 | `producao` | Servidor institucional | Reais | **OIDC obrigatório** + lista de e-mails autorizados |
 
 ```bash
-# Uso local com dados reais, sem login, acessível só neste computador (atalho)
+# Uso local com dados reais, acessível só neste computador (atalho)
 ./abrir_painel.sh
 
 # O mesmo, por extenso
-ETI_AMBIENTE=local ETI_PERMITIR_ACESSO_LOCAL_SEM_LOGIN=1 \
-  .venv/bin/streamlit run app.py --server.address localhost
+.venv/bin/streamlit run app.py --server.address localhost
 ```
 
 Depois, abra o endereço indicado no terminal (normalmente http://localhost:8501).
@@ -69,8 +68,10 @@ O cabeçalho traz o selo "Dados reais". Enquanto uma base não é importada, as 
 falta; nunca a preenchem com dados de exemplo. `ETI_AMBIENTE=demonstracao` é recusado com uma mensagem:
 esse modo foi removido.
 
-O acesso local sem login é recusado se o servidor não estiver ligado em `localhost`/`127.0.0.1`. Em
-produção, veja a [seção 12](#12-o-que-falta-para-um-ambiente-institucional-de-produção).
+**Sem login, o painel mostra tudo a quem abrir o endereço dele.** O atalho `./abrir_painel.sh` liga o
+servidor só neste computador (`localhost`). Não publique o painel com dados reais na internet (por
+exemplo, no Streamlit Community Cloud) enquanto não houver autenticação configurada; veja a
+[seção 12](#12-o-que-falta-para-um-ambiente-institucional-de-produção).
 
 ## 3. Como importar as planilhas
 
@@ -266,9 +267,9 @@ cruzamento.
 | Acesso a contatos | Só para usuários em `ETI_ACESSO_CONTATOS` (padrão: administradores), por ação explícita, com registro na auditoria. |
 | Logs | Um filtro remove e-mails, CPFs e telefones das mensagens e dos rastreamentos de erro. |
 | Erros na tela | `client.showErrorDetails = "none"`: o navegador nunca recebe rastreamento de erro. As mensagens de importação citam arquivo, linha e coluna, nunca valores. |
-| URLs | Não há dado pessoal em URLs ou parâmetros. As páginas ficam em `paginas/`, e não em `pages/`, para que nenhuma seja acessível sem passar pela barreira de autenticação do `app.py`. |
+| URLs | Não há dado pessoal em URLs ou parâmetros. As páginas ficam em `paginas/`, e não em `pages/`, para que todas passem pelo `app.py` (configuração, carga dos dados e, em produção, o login). |
 | Uploads | A extensão e a assinatura binária são conferidas. Arquivos com macros são recusados, há proteção contra *zip bomb* e há limites de tamanho e de linhas. |
-| Arquivos | O banco é criado com permissão 600 e a pasta de dados com 700. O `.gitignore` bloqueia planilhas, bancos, `.env`, `secrets.toml` e a marca. |
+| Arquivos | O banco é criado com permissão 600 e a pasta de dados com 700. O `.gitignore` bloqueia planilhas, bancos, `.env` e `secrets.toml`. |
 | Retenção | Mantêm-se as últimas N versões de cada base (`ETI_RETENCAO_IMPORTACOES`, padrão 3). As mais antigas têm os registros apagados e só os metadados ficam. |
 | Cache | Os dados carregados ficam no cache do processo, chaveado pela versão do banco. O cache só é consultado depois da autorização do usuário, e todos os coordenadores autorizados veem as mesmas informações. |
 

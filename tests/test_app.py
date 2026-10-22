@@ -11,8 +11,6 @@ import pytest
 from conftest import confere
 from streamlit.testing.v1 import AppTest
 
-from src import security
-
 APP = str(Path(__file__).resolve().parent.parent / "app.py")
 
 PAGINAS = [
@@ -27,10 +25,8 @@ def app(monkeypatch, tmp_path, dir_dados_real):
     dados = tmp_path / "dados"
     shutil.copytree(dir_dados_real, dados)
     monkeypatch.setenv("ETI_AMBIENTE", "local")
-    monkeypatch.setenv("ETI_PERMITIR_ACESSO_LOCAL_SEM_LOGIN", "1")
     monkeypatch.setenv("ETI_DIRETORIO_DADOS", str(dados))
     monkeypatch.delenv("ETI_CHAVE_PSEUDONIMIZACAO", raising=False)
-    monkeypatch.setattr(security, "servidor_em_endereco_local", lambda: True)  # o AppTest não tem servidor
     teste = AppTest.from_file(APP, default_timeout=240)
     teste.run()
     confere(not teste.exception, "o painel não abriu com os dados reais")

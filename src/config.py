@@ -94,7 +94,6 @@ class Configuracao:
     usuarios_autorizados: frozenset[str]
     administradores: frozenset[str]
     acesso_contatos: frozenset[str]
-    permitir_local_sem_login: bool
     fuso_horario: str
     retencao_importacoes: int
     exibir_marca: bool
@@ -174,7 +173,6 @@ def carregar_configuracao() -> Configuracao:
         usuarios_autorizados=_lista_emails(ler_opcao("ETI_USUARIOS_AUTORIZADOS")) | administradores,
         administradores=administradores,
         acesso_contatos=contatos,
-        permitir_local_sem_login=_verdadeiro(ler_opcao("ETI_PERMITIR_ACESSO_LOCAL_SEM_LOGIN")),
         fuso_horario=ler_opcao("ETI_FUSO_HORARIO", "America/Sao_Paulo") or "America/Sao_Paulo",
         retencao_importacoes=retencao,
         exibir_marca=_verdadeiro(ler_opcao("ETI_EXIBIR_MARCA", "1")),
