@@ -187,7 +187,7 @@ if secao == "Conciliação":
         if not sem_cadastro.empty:
             ui.secao(f"Contas de estudante sem registro no cadastro ({metrics.numero(len(sem_cadastro))})",
                      "Podem indicar inscrição fora do cadastro, e-mail diferente ou conta da equipe com papel de "
-                     "estudante. Nome como está na plataforma; e-mail parcial.")
+                     "estudante. Nome como está na plataforma" + ("." if publicada else "; e-mail parcial."))
             for conta in sem_cadastro.itertuples(index=False):
                 st.html(cartoes.linha_conta(conta))
 
@@ -234,7 +234,8 @@ if secao == "Conciliação":
             pessoas_nome = base.cursistas.drop_duplicates("chave_pessoa").set_index("chave_pessoa")["nome"]
             contas_nome = base.contas.drop_duplicates("chave_conta").set_index("chave_conta")["nome_completo"]
             vista = decisoes.assign(pessoa=decisoes["chave_pessoa"].map(pessoas_nome).fillna("(registro ausente do retrato atual)"),
-                                    conta=decisoes["chave_conta"].map(contas_nome).fillna("(conta ausente do retrato atual)"))
+                                    conta=decisoes["chave_conta"].map(contas_nome).fillna("(conta ausente do retrato atual)"),
+                                    decidido_em=decisoes["decidido_em"].map(lambda d: ui.data_local(d, fuso)))
             ui.tabela(vista, {"id": "Nº", "decisao": "Decisão", "pessoa": "Pessoa", "conta": "Conta",
                               "observacao": "Observação", "decidido_por": "Por", "decidido_em": "Em"})
             if admin and not publicada:
