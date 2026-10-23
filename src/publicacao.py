@@ -40,8 +40,12 @@ def _copiar(origem: Path, destino: Path) -> None:
     copia.close()
 
 
-def gerar(origem: Path, chave: str, pasta_destino: Path) -> dict:
-    """Gera ``pasta_destino/eti.sqlite3`` e ``publicacao.json`` a partir do banco local."""
+def gerar(origem: Path, chave: str, pasta_destino: Path, versao: str | None = None) -> dict:
+    """Gera ``pasta_destino/eti.sqlite3`` e ``publicacao.json`` a partir do banco local.
+
+    ``versao`` é a versão dos dados locais (``Repositorio.versao``) de que a cópia foi gerada: o painel
+    local compara essa versão com a atual para saber se a versão publicada ficou para trás.
+    """
     pasta_destino.mkdir(parents=True, exist_ok=True)
     temporario = pasta_destino / f"{ARQUIVO}.tmp"
     temporario.unlink(missing_ok=True)
@@ -80,6 +84,8 @@ def gerar(origem: Path, chave: str, pasta_destino: Path) -> dict:
         raise PublicacaoInsegura(f"{vazados} dado(s) de contato apareceriam na versão publicada; nada foi publicado.")
     temporario.replace(pasta_destino / ARQUIVO)
     info = {"publicado_em": datetime.now(timezone.utc).isoformat(timespec="seconds"), "registros": contagens}
+    if versao:
+        info["versao"] = versao
     (pasta_destino / INFO).write_text(json.dumps(info, ensure_ascii=False, indent=2), encoding="utf-8")
     return info
 
@@ -98,8 +104,17 @@ def verificar(origem: Path, publicado: Path) -> int:
     return sum(e.lower() in texto for e in emails) + sum(len(t) >= 8 and t in numeros for t in telefones)
 
 
-def data_publicacao(pasta: Path) -> str | None:
+def _info(pasta: Path) -> dict:
     try:
-        return json.loads((pasta / INFO).read_text(encoding="utf-8")).get("publicado_em")
+        return json.loads((pasta / INFO).read_text(encoding="utf-8"))
     except (OSError, ValueError):
-        return None
+        return {}
+
+
+def data_publicacao(pasta: Path) -> str | None:
+    return _info(pasta).get("publicado_em")
+
+
+def desatualizada(pasta: Path, versao: str) -> bool:
+    """A versão publicada existe e foi gerada de outra versão dos dados locais (ou de versão desconhecida)."""
+    return pasta.is_dir() and _info(pasta).get("versao") != versao

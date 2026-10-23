@@ -1,11 +1,14 @@
 """Leitura automática dos arquivos reais colocados na pasta do painel (sem passo de importação)."""
 
+import os
 import shutil
+from datetime import datetime, timezone
 
 import pytest
 from conftest import RAIZ, confere
 
 from src import config, pasta
+from src.normalization import momento_no_nome
 from src.persistence import Repositorio
 
 
@@ -53,6 +56,30 @@ def test_pasta_lida_ao_abrir_e_relida_so_quando_muda(cfg, pseudo, pasta_real, ar
     shutil.copy2(arquivos_cadastro[1], pasta_real / arquivos_cadastro[1].name)  # e volta
     pasta.sincronizar(repo, pseudo, cfg)
     assert len(repo.registros("cadastro")) == sum(len(t.dados) for t in tabelas_cadastro)
+
+
+def test_data_da_lista_vem_do_arquivo(cfg, pseudo, pasta_real, arquivo_atividade):
+    """Sem data no nome, a referência da lista é o momento em que o arquivo foi gravado; nada é estimado."""
+    if momento_no_nome(arquivo_atividade.name, cfg.fuso_horario) is not None:
+        pytest.skip("a lista real traz a data no nome")
+    repo = Repositorio(cfg.dir_dados / "eti.sqlite3").inicializar()
+    pasta.sincronizar(repo, pseudo, cfg)
+    copia = pasta_real / arquivo_atividade.name
+    gravado = datetime.fromtimestamp(arquivo_atividade.stat().st_mtime, timezone.utc).replace(microsecond=0)
+    assert pasta.momento_do_arquivo(copia, cfg.fuso_horario) == (gravado, "data do arquivo")  # copy2 preserva a data
+    ativa = repo.importacao_ativa("atividade")
+    assert ativa["referencia_em"] == gravado.isoformat() and "conforme a data do arquivo" in ativa["referencia_descricao"]
+    registros = repo.registros("atividade")
+    relativos = registros[registros["acesso_tipo"] == "relativo"]
+    confere(len(relativos) > 0 and relativos["acesso_momento"].notna().all(),
+            "último acesso relativo sem data, mesmo com a data da lista")
+
+    pasta._ULTIMA_CONFERENCIA.clear()  # nova abertura do painel: os mesmos arquivos não são relidos
+    assert pasta.sincronizar(repo, pseudo, cfg).importadas == []
+    novo = gravado.timestamp() + 3600  # o mesmo arquivo gravado de novo, uma hora depois
+    os.utime(copia, (novo, novo))
+    assert len(pasta.sincronizar(repo, pseudo, cfg).importadas) == 1
+    assert repo.importacao_ativa("atividade")["referencia_em"] == datetime.fromtimestamp(novo, timezone.utc).isoformat()
 
 
 def test_pasta_sem_arquivos_nao_inventa_nada(tmp_path, pseudo, monkeypatch):

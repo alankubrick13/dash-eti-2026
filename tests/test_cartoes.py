@@ -99,3 +99,44 @@ def test_tempo_desde_o_ultimo_acesso(base_real):
     assert [cartoes.tempo_desde(s) for s in (1800, 5 * 3600, 86400 + 10, 20 * 86400)] == [
         "há menos de 1 hora", "há 5 horas", "há 1 dia", "há 20 dias"]
     assert cartoes.tempo_desde(float("nan")) is None
+
+
+def _contatos_vazados(html: str, base) -> int:
+    """E-mails completos e telefones reais (8 dígitos ou mais) presentes num HTML."""
+    texto = html.lower()
+    digitos = re.sub(r"\D", "", texto)
+    emails = {str(e).lower() for e in [*base.cursistas["email"], *base.contas["email"]] if not eh_vazio(e) and "@" in str(e)}
+    telefones = {re.sub(r"\D", "", str(t)) for t in [*base.cursistas["telefone"], *base.cursistas["whatsapp"]] if not eh_vazio(t)}
+    return sum(e in texto for e in emails) + sum(len(t) >= 8 and t in digitos for t in telefones)
+
+
+def test_cartoes_de_turma_um_ponto_por_estudante(base_real, cores):
+    if not base_real.tem_atividade:
+        pytest.skip("base de atividade não importada")
+    parametros = base_real.parametros
+    limite = parametros["limite_acompanhamento_dias"]
+    turmas = painel.resumo_turmas(base_real.contas, parametros["janela_acesso_recente_dias"], limite)
+    incoerentes = 0
+    for turma in turmas.itertuples(index=False):
+        html = cartoes.cartao_turma(turma, cores, limite)
+        pontos = re.search(r'<div class="eti-pontos"[^>]*>(.*?)</div>', html).group(1)
+        incoerentes += pontos.count("<i style=") != min(turma.estudantes, 60)
+        incoerentes += f"<b>{turma.acessaram} de {turma.estudantes}</b>" not in html
+    confere(len(turmas) > 0 and incoerentes == 0, f"{incoerentes} cartão(ões) de turma incoerente(s)")
+
+
+def test_cartoes_novos_nao_mostram_contatos(base_real, pessoas, cores):
+    """Turmas, contas sem cadastro, pendências e sugestões de conciliação: sem e-mail completo nem telefone."""
+    from src.security import mascarar_email
+
+    contas = base_real.contas
+    sem_cadastro = contas[(contas["eh_cursista"] == 1) & (contas["status_conciliacao"] != "Correspondente")]
+    html = "".join(cartoes.linha_conta(c) for c in sem_cadastro.itertuples(index=False))
+    html += "".join(cartoes.linha_pendencia(p, ["Código INEP ausente"], cores) for p in pessoas.head(200).itertuples(index=False))
+    if not base_real.candidatos.empty:
+        pares = (base_real.candidatos
+                 .merge(base_real.cursistas[["id_registro", "nome", "uf", "ente", "escola", "email"]], on="id_registro")
+                 .merge(contas[["id_conta", "nome_completo", "grupos", "lista_grupos", "email", "ultimo_acesso_texto"]]
+                        .rename(columns={"email": "email_conta"}), on="id_conta"))
+        html += "".join(cartoes.sugestao_conciliacao(p, mascarar_email) for p in pares.itertuples(index=False))
+    confere(_contatos_vazados(html, base_real) == 0, "contato real dentro dos cartões novos")

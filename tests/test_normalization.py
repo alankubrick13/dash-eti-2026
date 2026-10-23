@@ -4,9 +4,11 @@ Cada verificação percorre os valores reais dos arquivos fornecidos. Variaçõe
 código, um dígito verificador trocado) são derivadas desses valores; nenhum dado é inventado.
 """
 
+import re
 from datetime import date, datetime, timedelta, timezone
 from zoneinfo import ZoneInfo
 
+import pytest
 from conftest import FUSO, confere, quadro, valores
 
 from src.config import CODIGO_DA_SIGLA, NOME_DA_SIGLA
@@ -20,6 +22,7 @@ from src.normalization import (
     interpretar_data,
     interpretar_ultimo_acesso,
     limpar_texto,
+    momento_no_nome,
     normalizar_email,
     normalizar_uf,
     unificar_categorias,
@@ -187,6 +190,32 @@ def test_data_absoluta_usa_o_fuso(arquivo_atividade):
     assert interpretar_ultimo_acesso(momento.strftime("%d/%m/%Y %H:%M"), "America/Manaus").momento == manaus.astimezone(timezone.utc)
     assert interpretar_ultimo_acesso(esperado.strftime("%Y-%m-%dT%H:%M:%SZ")).momento == esperado
     assert esperado - timedelta(days=1) < datetime.now(timezone.utc)
+
+
+def test_data_e_hora_no_nome_dos_arquivos(arquivos_cadastro, arquivo_atividade):
+    """O nome real da planilha do cadastro traz a posição (ex.: "14ago26_8h02"); arquivos sem data no nome ficam sem."""
+    meses = ["jan", "fev", "mar", "abr", "mai", "jun", "jul", "ago", "set", "out", "nov", "dez"]
+    lidos = 0
+    for arquivo in arquivos_cadastro:
+        momento = momento_no_nome(arquivo.name, FUSO)
+        if momento is None:
+            confere(not re.search(r"\d{1,2}(" + "|".join(meses) + r")\d{2}", arquivo.name.lower()),
+                    "data no nome de uma planilha real não foi lida")
+            continue
+        local = momento.astimezone(ZoneInfo(FUSO))
+        confere(f"{local.day}{meses[local.month - 1]}{local:%y}_{local.hour}h{local:%M}" in arquivo.name.lower(),
+                "data e hora lidas não correspondem ao nome da planilha real")
+        lidos += 1
+    if not lidos:
+        pytest.skip("nenhuma planilha real com data no nome")
+    assert momento_no_nome(arquivo_atividade.name, FUSO) is None  # a lista do Moodle não traz data no nome
+    # Especificação dos formatos, com o momento real em que a lista da plataforma foi salva
+    salvo = datetime.fromtimestamp(arquivo_atividade.stat().st_mtime, ZoneInfo(FUSO)).replace(second=0, microsecond=0)
+    nomes = (f"participantes_{salvo.day}{meses[salvo.month - 1]}{salvo:%y}_{salvo.hour}h{salvo:%M}.txt",
+             f"participantes {salvo:%Y-%m-%d} {salvo:%H}h{salvo:%M}.txt", f"lista_{salvo:%d-%m-%Y}_{salvo:%H%M}.txt")
+    for nome in nomes:
+        assert momento_no_nome(nome, FUSO) == salvo.astimezone(timezone.utc), nome
+    assert momento_no_nome(f"lista_31fev{salvo:%y}.txt", FUSO) is None  # data impossível não vira data
 
 
 def test_categorias_reais_unificadas_pela_grafia_da_fonte(tabelas_cadastro):

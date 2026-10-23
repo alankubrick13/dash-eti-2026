@@ -1,4 +1,4 @@
-"""Fichas da escola e do cursista, abertas em gaveta lateral (st.dialog à direita) a partir de qualquer página.
+"""Fichas da escola, da turma e do cursista, abertas em gaveta lateral (st.dialog à direita) a partir de qualquer página.
 
 Quem quer abrir uma ficha chama ``pedir`` (em geral no clique de um cartão). A ficha pedida fica na
 sessão e o app chama ``abrir_pendente`` a cada execução, antes da página: a gaveta abre por cima da
@@ -38,7 +38,7 @@ STATUS_IBGE = {
 
 
 def pedir(tipo: str, chave: str, origem: tuple[str, str] | None = None) -> None:
-    """Abre a ficha ("escola" ou "cursista") a partir da próxima execução."""
+    """Abre a ficha ("escola", "turma" ou "cursista") a partir da próxima execução."""
     st.session_state[ABERTA] = (tipo, chave, origem)
 
 
@@ -53,6 +53,8 @@ def abrir_pendente() -> None:
     tipo, chave, origem = aberta
     if tipo == "escola":
         _gaveta_escola(chave, origem)
+    elif tipo == "turma":
+        _gaveta_turma(chave, origem)
     elif tipo == "cursista":
         _gaveta_cursista(chave, origem)
 
@@ -67,6 +69,12 @@ def _trocar_de_ficha(tipo: str, chave: str) -> None:
 def _gaveta_escola(chave: str, origem: tuple[str, str] | None = None) -> None:
     _trocar_de_ficha("escola", chave)
     conteudo_escola(painel.contexto(), chave, origem)
+
+
+@st.dialog("Ficha da turma", width="large", position="right", icon=":material/groups:", on_dismiss=fechar)
+def _gaveta_turma(grupo: str, origem: tuple[str, str] | None = None) -> None:
+    _trocar_de_ficha("turma", grupo)
+    conteudo_turma(painel.contexto(), grupo)
 
 
 @st.dialog("Ficha do cursista", width="medium", position="right", icon=":material/person:", on_dismiss=fechar)
@@ -86,12 +94,21 @@ def _data(iso, fuso: str) -> str | None:
     return momento.astimezone(ZoneInfo(fuso)).strftime("%d/%m/%Y %H:%M") if momento.tzinfo else momento.strftime("%d/%m/%Y")
 
 
+def _dia(c) -> str | None:
+    """Dia aproximado do último acesso (data da lista menos o tempo informado pela plataforma)."""
+    dia = c["acesso_dia"] if "acesso_dia" in c else None
+    return f"{dia[8:10]}/{dia[5:7]}/{dia[:4]}" if isinstance(dia, str) and len(dia) == 10 else None
+
+
 def _voltar(origem: tuple[str, str] | None, base) -> None:
     if not origem:
         return
     tipo, chave = origem
     if tipo == "escola":
         rotulo = "Voltar para a escola"
+    elif tipo == "turma":
+        identificada = painel.turma(chave)
+        rotulo = f"Voltar para a turma {identificada[0]} · T{identificada[1]}" if identificada else "Voltar para a turma"
     else:
         nome = base.cursistas.loc[base.cursistas["id_registro"] == chave, "nome"]
         rotulo = f"Voltar para a ficha de {cartoes.nome_legivel(nome.iloc[0])}" if len(nome) else "Voltar"
@@ -201,6 +218,61 @@ def conteudo_escola(ctx, chave: str, origem: tuple[str, str] | None = None) -> N
     ui.nota(f"{ui.fonte_escolas(base)} {school_data.AVISO_PROGRAMA}")
 
 
+# ---------------------------------------------------------------- ficha da turma
+
+
+def conteudo_turma(ctx, grupo: str) -> None:
+    base = ctx.base
+    parametros = base.parametros
+    janela, limite = parametros["janela_acesso_recente_dias"], parametros["limite_acompanhamento_dias"]
+    # Todas as contas da turma, independentemente dos filtros da barra lateral (como na ficha da escola)
+    resumo = painel.resumo_turmas(base.contas, janela, limite)
+    linha = resumo[resumo["grupo"] == grupo]
+    if linha.empty:
+        ui.vazio("Turma não encontrada na base atual.")
+        return
+    t = linha.iloc[0]
+    equipe = [f"{papel}: {n}" for papel, n in sorted(t["equipe"].items())]
+    ui.cabecalho_ficha("Turma da plataforma de formação", t["rotulo"], [f"Grupo “{grupo}”", *equipe])
+    st.html(cartoes.numeros([
+        ("Estudantes", metrics.numero(t["estudantes"]), None),
+        ("Já acessaram o curso", f"{t['acessaram']} de {t['estudantes']}",
+         f"{metrics.percentual(t['taxa_acesso'], 0)} da turma"),
+        (f"Acessaram nos últimos {janela} dias", metrics.numero(t["recentes"]), None),
+        ("Nunca acessaram", metrics.numero(t["nunca"]), None),
+        (f"Sem acesso há mais de {limite} dias", metrics.numero(t["inativos"]), None),
+    ]))
+    cores = _cores(base)
+    st.html(cartoes.pontos(t["faixas"], cores, limite=60))
+
+    da_turma = base.cursistas[base.cursistas["lista_grupos"].map(lambda grupos: grupo in grupos)]
+    pessoas = painel.pessoas_de(da_turma).sort_values(["prioridade", "dias_sem_acesso", "nome_chave"],
+                                                     ascending=[True, False, True], na_position="last")
+    atencao = pessoas[pessoas["requer_acompanhamento"]]
+    em_dia = pessoas[~pessoas["requer_acompanhamento"]]
+    st.markdown(f"#### Precisam de atenção ({metrics.numero(len(atencao))})")
+    if atencao.empty:
+        ui.vazio("Ninguém desta turma está sem acesso há mais do que o limite de acompanhamento.")
+    for i, pessoa in enumerate(atencao.itertuples(index=False)):
+        ui.clicavel(cartoes.linha_pessoa(pessoa, cores), f"turma_atencao_{i}",
+                    f"Abrir a ficha de {cartoes.nome_legivel(pessoa.nome)}", pedir,
+                    ("cursista", pessoa.id_registro, ("turma", grupo)))
+    if not em_dia.empty:
+        with st.expander(f"Com acesso em dia ({metrics.numero(len(em_dia))})"):
+            for i, pessoa in enumerate(em_dia.itertuples(index=False)):
+                ui.clicavel(cartoes.linha_pessoa(pessoa, cores), f"turma_em_dia_{i}",
+                            f"Abrir a ficha de {cartoes.nome_legivel(pessoa.nome)}", pedir,
+                            ("cursista", pessoa.id_registro, ("turma", grupo)))
+    sem_cadastro = base.contas[(base.contas["eh_cursista"] == 1) & (base.contas["status_conciliacao"] != rc.CORRESPONDENTE)
+                               & base.contas["lista_grupos"].map(lambda grupos: grupo in grupos)]
+    if not sem_cadastro.empty:
+        st.markdown(f"#### Estudantes sem registro conciliado no cadastro ({metrics.numero(len(sem_cadastro))})")
+        for conta in sem_cadastro.itertuples(index=False):
+            st.html(cartoes.linha_conta(conta))
+    ui.nota(f"Critérios operacionais configuráveis; não indicam evasão ou desistência. "
+            f"{ui.fonte_atividade(base, ctx.cfg.fuso_horario)}")
+
+
 # ---------------------------------------------------------------- ficha do cursista
 
 
@@ -230,10 +302,12 @@ def _passos(c, base, fuso: str) -> list[tuple[str, str, str]]:
     passos.append(("ok", "Acesso ao curso", "Já acessou o curso"))
     limite = base.parametros["limite_acompanhamento_dias"]
     tempo = descrever_duracao(c["acesso_segundos"])
+    dia = _dia(c)
+    quando = f"Há {tempo}" + (f" · por volta de {dia}" if dia else "")
     if c["dias_sem_acesso"] > limite:
-        passos.append(("atencao", "Último acesso", f"Há {tempo}: acima do limite de {limite} dias"))
+        passos.append(("atencao", "Último acesso", f"{quando}: acima do limite de {limite} dias"))
     else:
-        passos.append(("ok", "Último acesso", f"Há {tempo}"))
+        passos.append(("ok", "Último acesso", quando))
     return passos
 
 
@@ -306,13 +380,15 @@ def conteudo_cursista(ctx, id_registro: str, origem: tuple[str, str] | None = No
         with st.expander("Plataforma de formação"):
             pares = [("Conciliação", c["status_conciliacao"]), ("Regra aplicada", c["regra_conciliacao"])]
             if pd.notna(c["id_conta"]):
-                momento = _data(c["acesso_momento"], fuso)
+                dia = _dia(c)
                 pares += [
                     ("Nome na plataforma", c["conta_nome"]), ("Papel", c["papeis"]), ("Grupo(s)", c["grupo"]),
                     ("Situação da conta", c["situacao_conta"]),
                     ("Último acesso (como exportado)", c["ultimo_acesso_texto"]),
                     ("Faixa", c["faixa_acesso"]),
-                    ("Data aproximada do último acesso", momento or "não calculada sem a data de exportação"),
+                    ("Dia aproximado do último acesso",
+                     f"{dia} (data da lista menos o tempo informado pela plataforma)" if dia
+                     else "não calculado sem a data da lista" if c["acesso_tipo"] == "relativo" else None),
                 ]
             ui.lista_definicoes(pares)
     with st.expander("Origem dos dados"):

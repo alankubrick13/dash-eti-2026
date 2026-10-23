@@ -13,7 +13,8 @@ import pandas as pd
 
 from . import reconciliation as rc
 from . import school_data
-from .painel import MOTIVO_CONCILIACAO, pessoas_de
+from .painel import (GRUPO_NUNCA, MOTIVO_CONCILIACAO, grupo_inativos, grupo_recentes, ordem_natural,
+                     pessoas_de, resumo_turmas)
 
 
 @dataclass(frozen=True)
@@ -82,6 +83,13 @@ INDICADORES: dict[str, Indicador] = {i.id: i for i in (
               "pessoas com conta associada ÷ pessoas cadastradas", _FONTE_ATV,
               "Casos pendentes ou ambíguos ficam fora do numerador até a revisão manual.",
               "Uma pessoa pode ter conta com outro e-mail ainda não conciliada.", percentual=True),
+    Indicador("pct_ja_acessaram", "Já acessaram o curso", "pessoas",
+              "Entre as pessoas com conta encontrada, proporção das que têm algum acesso ao curso registrado "
+              "na exportação da plataforma.",
+              "pessoas com último acesso informado ÷ pessoas com conta encontrada", _FONTE_ATV,
+              "“Nunca acessou” e acesso não interpretado contam no denominador e não no numerador.",
+              "Um único acesso basta para entrar no numerador; não informa frequência nem conclusão de atividades.",
+              percentual=True),
     Indicador("pct_contas_ativas", "Contas com situação ativa", "pessoas",
               "Entre as pessoas com conta encontrada, proporção cuja conta está em situação considerada "
               "ativa (parâmetro configurável).",
@@ -209,13 +217,15 @@ def calcular(cursistas: pd.DataFrame, contas: pd.DataFrame, base, parametros: di
     r["pct_inep_valido"] = _razao("pct_inep_valido", int((cursistas["inep_status"] == "valido").sum()), len(cursistas))
 
     if not base.tem_atividade:
-        for i in ("pct_contas_encontradas", "pct_contas_ativas", "pct_acesso_recente", "pessoas_acompanhamento",
+        for i in ("pct_contas_encontradas", "pct_ja_acessaram", "pct_contas_ativas", "pct_acesso_recente", "pessoas_acompanhamento",
                   "registros_pendentes", "contas_cursista", "contas_sem_cadastro"):
             r[i] = _indisponivel(i, "Exportação da plataforma não encontrada na pasta.")
         return r
 
     com_conta = pessoas[pessoas["status_conciliacao"] == rc.CORRESPONDENTE]
     r["pct_contas_encontradas"] = _razao("pct_contas_encontradas", len(com_conta), n_pessoas)
+    acessaram = int(com_conta["acesso_tipo"].isin(["relativo", "absoluto"]).sum())
+    r["pct_ja_acessaram"] = _razao("pct_ja_acessaram", acessaram, len(com_conta))
     ativas = int(com_conta["conta_ativa"].fillna(False).astype(bool).sum())
     r["pct_contas_ativas"] = _razao("pct_contas_ativas", ativas, len(com_conta))
     limite = parametros["janela_acesso_recente_dias"]
@@ -237,6 +247,66 @@ def calcular(cursistas: pd.DataFrame, contas: pd.DataFrame, base, parametros: di
         denominador=len(contas_cursista), contexto=f"de {numero(len(contas_cursista))} contas de cursistas",
     )
     return r
+
+
+@dataclass
+class Destaque:
+    """Um fato do recorte, com o número principal e a população de referência na frase."""
+
+    icone: str
+    valor: str
+    titulo: str
+    texto: str
+    acao: tuple | None = None  # ("pagina", caminho, grupo da galeria) ou ("turma", grupo)
+
+
+def destaques(cursistas: pd.DataFrame, contas: pd.DataFrame, parametros: dict, minimo_turma: int = 10) -> list[Destaque]:
+    """Os fatos que abrem a Visão geral, calculados no recorte; vazio sem cadastro ou sem atividade."""
+    if cursistas.empty or contas.empty:
+        return []
+    pessoas = pessoas_de(cursistas)
+    com_conta = pessoas[pessoas["status_conciliacao"] == rc.CORRESPONDENTE]
+    n = len(com_conta)
+    if not n:
+        return []
+    janela, limite = parametros["janela_acesso_recente_dias"], parametros["limite_acompanhamento_dias"]
+    acessaram = int(com_conta["acesso_tipo"].isin(["relativo", "absoluto"]).sum())
+    recentes = int((com_conta["dias_sem_acesso"].fillna(10**9) <= janela).sum())
+    nunca = int((com_conta["acesso_tipo"] == "nunca").sum())
+    inativos = int((com_conta["dias_sem_acesso"].fillna(-1) > limite).sum())
+    itens = [
+        Destaque("how_to_reg", percentual(acessaram / n), "já acessaram o curso",
+                 f"{numero(acessaram)} de {numero(n)} pessoas com conta na plataforma",
+                 ("pagina", "paginas/3_atividade.py", None)),
+        Destaque("schedule", numero(recentes), f"acessaram nos últimos {janela} dias",
+                 f"{percentual(recentes / n)} das pessoas com conta",
+                 ("pagina", "paginas/2_cursistas.py", grupo_recentes(janela))),
+        Destaque("person_off", numero(nunca), "nunca acessaram",
+                 f"e {numero(inativos)} estão sem acesso há mais de {limite} dias",
+                 ("pagina", "paginas/2_cursistas.py", GRUPO_NUNCA)),
+    ]
+    turmas = resumo_turmas(contas, janela, limite)
+    turmas = turmas[turmas["estudantes"] >= minimo_turma]
+    if not turmas.empty:
+        # Empates são comuns (ex.: 20 de 30 em várias turmas): todas as empatadas são citadas
+        menor = turmas["taxa_acesso"].min()
+        piores = turmas[(turmas["taxa_acesso"] - menor).abs() < 1e-9].sort_values("rotulo", key=lambda r: r.map(ordem_natural))
+        pares = set(zip(piores["acessaram"], piores["estudantes"]))
+        contagem = f"{numero(piores['acessaram'].iloc[0])} de {numero(piores['estudantes'].iloc[0])}"
+        if len(piores) == 1:
+            texto = f"{piores['rotulo'].iloc[0]}: {contagem} estudantes já entraram"
+            acao = ("turma", piores["grupo"].iloc[0])
+        else:
+            nomes = list(piores["rotulo"])
+            lista = ", ".join(nomes[:-1]) + " e " + nomes[-1]
+            texto = f"{len(nomes)} turmas empatadas{f' ({contagem} em cada)' if len(pares) == 1 else ''}: {lista}"
+            acao = ("pagina", "paginas/3_atividade.py", None)
+        itens.append(Destaque("groups", percentual(menor, 0), "é a menor taxa de acesso entre as turmas", texto, acao))
+    if inativos and len(itens) < 4:
+        itens.append(Destaque("hourglass_bottom", numero(inativos), f"sem acesso há mais de {limite} dias",
+                              f"{percentual(inativos / n)} das pessoas com conta",
+                              ("pagina", "paginas/2_cursistas.py", grupo_inativos(limite))))
+    return itens
 
 
 def contagem_motivos(cursistas: pd.DataFrame) -> pd.DataFrame:

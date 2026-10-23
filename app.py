@@ -44,13 +44,15 @@ _descartar_codigo_desatualizado()
 from src import ambiente, config, fichas, painel, pasta, publicacao, security, ui  # noqa: E402
 
 PAGINAS = (
-    ("Acompanhamento", "paginas/1_visao_geral.py", "Visão geral", "visao-geral", False),
-    ("Acompanhamento", "paginas/2_cursistas.py", "Cursistas", "cursistas", False),
-    ("Acompanhamento", "paginas/4_escolas.py", "Escolas", "escolas", False),
-    ("Acompanhamento", "paginas/3_atividade.py", "Atividade e participação", "atividade", False),
-    ("Acompanhamento", "paginas/5_territorio.py", "Mapa e território", "territorio", False),
-    ("Gestão dos dados", "paginas/6_qualidade_conciliacao.py", "Qualidade e conciliação", "qualidade", False),
-    ("Gestão dos dados", "paginas/7_administracao.py", "Administração", "administracao", True),
+    ("Acompanhamento", "paginas/1_visao_geral.py", "Visão geral", "visao-geral", ":material/dashboard:", False),
+    ("Acompanhamento", "paginas/2_cursistas.py", "Cursistas", "cursistas", ":material/groups:", False),
+    ("Acompanhamento", "paginas/4_escolas.py", "Escolas", "escolas", ":material/school:", False),
+    ("Acompanhamento", "paginas/3_atividade.py", "Atividade e turmas", "atividade", ":material/insights:", False),
+    ("Acompanhamento", "paginas/5_territorio.py", "Mapa e território", "territorio", ":material/map:", False),
+    ("Dados e método", "paginas/6_qualidade_conciliacao.py", "Qualidade e conciliação", "qualidade",
+     ":material/fact_check:", False),
+    ("Dados e método", "paginas/8_sobre.py", "Sobre os dados", "sobre", ":material/info:", False),
+    ("Dados e método", "paginas/7_administracao.py", "Administração", "administracao", ":material/settings:", True),
 )
 
 
@@ -88,7 +90,11 @@ def barra_lateral(base: painel.Base, cfg, usuario) -> dict[str, list]:
                 st.button("Limpar filtros", on_click=_limpar_filtros, width="stretch")
             st.caption("Os filtros valem para todas as páginas.")
         st.divider()
-        st.caption(f"Usuário: {usuario.nome}")
+        if cfg.ambiente == "publicacao":
+            publicado = ui.publicado_em(cfg)
+            st.caption(f"Versão publicada em {publicado}." if publicado else "Versão publicada do painel.")
+        else:
+            st.caption(f"Usuário: {usuario.nome}")
         if usuario.metodo == "oidc" and st.button("Sair", width="stretch"):
             st.logout()
         st.caption(config.AVISO_NATUREZA)
@@ -111,24 +117,30 @@ def main() -> None:
         st.stop()
     # Os dados são os arquivos colocados na pasta (no painel online, a versão publicada já traz tudo)
     leitura = pasta.sincronizar(repo, pseudo, cfg) if cfg.ambiente == "local" else pasta.Resultado()
-    if leitura.importadas:  # arquivos novos na pasta: a versão publicada acompanha (falta só enviá-la)
+    versao = repo.versao()
+    # Dados novos (arquivos, decisões de conciliação, parâmetros): a versão publicada acompanha (falta só enviá-la)
+    if cfg.ambiente == "local" and (leitura.importadas or publicacao.desatualizada(cfg.pasta_publicada, versao)):
         try:
-            publicacao.gerar(cfg.dir_dados / "eti.sqlite3", security.obter_chave_pseudonimizacao(cfg), cfg.pasta_publicada)
+            publicacao.gerar(cfg.dir_dados / "eti.sqlite3", security.obter_chave_pseudonimizacao(cfg),
+                             cfg.pasta_publicada, versao)
         except Exception:
             logger.exception("falha ao gerar a versão publicada")
-    base = painel.carregar_base(repo)
+    base = painel.carregar_base(repo, cfg.fuso_horario)
     filtros = barra_lateral(base, cfg, usuario)
     cursistas, contas = painel.aplicar_filtros(base, filtros)
     st.session_state["_contexto"] = painel.Contexto(cfg, usuario, repo, base, filtros, cursistas, contas, pseudo)
 
     secoes: dict[str, list] = {}
-    for secao, arquivo, titulo, caminho, restrita in PAGINAS:
+    for secao, arquivo, titulo, caminho, icone, restrita in PAGINAS:
         if restrita and not usuario.administrador:
             continue
         secoes.setdefault(secao, []).append(
-            st.Page(arquivo, title=titulo, url_path=caminho, default=(caminho == "visao-geral"))
+            st.Page(arquivo, title=titulo, url_path=caminho, icon=icone, default=(caminho == "visao-geral"))
         )
     navegacao = st.navigation(secoes, position="sidebar")
+    destino = st.session_state.pop(ui.IR_PARA, None)  # clique num destaque que leva a outra página
+    if destino:
+        st.switch_page(destino)
     ui.cabecalho(cfg, base)
     if leitura.importadas:
         st.toast("Dados atualizados a partir dos arquivos da pasta: " + "; ".join(leitura.importadas) + ".",

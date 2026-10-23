@@ -357,6 +357,34 @@ def interpretar_ultimo_acesso(valor, fuso: str = "America/Sao_Paulo") -> Acesso:
     return Acesso("nao_interpretado")
 
 
+_RE_NOME_EXTENSO = re.compile(
+    r"(?<!\d)(\d{1,2})(jan|fev|mar|abr|mai|jun|jul|ago|set|out|nov|dez)(\d{4}|\d{2})(?!\d)"
+    r"(?:[\s_.-]*(\d{1,2})h(\d{2})?(?!\d))?"
+)
+_RE_NOME_ISO = re.compile(r"(?<!\d)(\d{4})-(\d{2})-(\d{2})(?!\d)(?:[\s_t.-]*(\d{1,2})[h:-]?(\d{2})(?!\d))?")
+_RE_NOME_NUM = re.compile(r"(?<!\d)(\d{2})[.-](\d{2})[.-](\d{4})(?!\d)(?:[\s_.-]*(\d{1,2})[h:-]?(\d{2})(?!\d))?")
+
+
+def momento_no_nome(nome: str, fuso: str = "America/Sao_Paulo") -> datetime | None:
+    """Data e hora escritas no nome de um arquivo, em UTC; None se o nome não traz data.
+
+    Formatos: "14ago26_8h02" (dia, mês abreviado, ano, hora), "2026-10-21 14h58" e "21-10-2026 14h58".
+    Sem hora no nome, vale 00:00 do dia.
+    """
+    texto = remover_acentos(str(nome).lower())
+    if m := _RE_NOME_EXTENSO.search(texto):
+        dia, mes, ano, hora, minuto = m.groups()
+        ano = int(ano) + (2000 if len(ano) == 2 else 0)
+        return _como_utc(ano, _MESES[mes], dia, hora, minuto, 0, fuso)
+    if m := _RE_NOME_ISO.search(texto):
+        ano, mes, dia, hora, minuto = m.groups()
+        return _como_utc(ano, mes, dia, hora, minuto, 0, fuso)
+    if m := _RE_NOME_NUM.search(texto):
+        dia, mes, ano, hora, minuto = m.groups()
+        return _como_utc(ano, mes, dia, hora, minuto, 0, fuso)
+    return None
+
+
 def descrever_duracao(segundos: float | None) -> str:
     """Duração legível, no estilo do Moodle (duas maiores unidades)."""
     if segundos is None or (isinstance(segundos, float) and math.isnan(segundos)):

@@ -82,12 +82,15 @@ def test_painel_online_so_para_leitura(publicado, monkeypatch):
     teste.run()
     confere(not teste.exception and not teste.error, "o painel online não abriu")
     for pagina in ("paginas/1_visao_geral.py", "paginas/2_cursistas.py", "paginas/4_escolas.py",
-                   "paginas/3_atividade.py", "paginas/5_territorio.py", "paginas/6_qualidade_conciliacao.py"):
+                   "paginas/3_atividade.py", "paginas/5_territorio.py", "paginas/6_qualidade_conciliacao.py",
+                   "paginas/8_sobre.py"):
         teste.switch_page(pagina).run()
         confere(not teste.exception and not teste.error, f"{pagina}: erro no painel online")
         texto = " ".join([m.value for m in teste.markdown] + [h.proto.body for h in teste.get("html")]).lower()
-        confere("codigo:" not in texto, f"{pagina}: código de e-mail exibido na tela")
+        confere("codigo:" not in texto and "•••" not in texto, f"{pagina}: código ou máscara de e-mail exibidos")
         confere("versão publicada" in texto, f"{pagina}: selo da versão publicada ausente")
+        if pagina == "paginas/6_qualidade_conciliacao.py":
+            confere(not [b for b in teste.button if b.label in ("Associar", "Rejeitar")], "decisão de conciliação online")
     teste.switch_page("paginas/2_cursistas.py").run()
     cartoes = [h for h in teste.get("html") if h.proto.body.startswith('<div class="eti-cartao')]
     confere(len(cartoes) == 24, "a galeria online não mostrou os cursistas")
@@ -96,3 +99,24 @@ def test_painel_online_so_para_leitura(publicado, monkeypatch):
     confere(not [b for b in teste.button if b.label == "Exibir dados de contato"], "contato disponível online")
     with pytest.raises(Exception):
         teste.switch_page("paginas/7_administracao.py").run()  # Administração não existe para o visitante
+
+
+def test_versao_publicada_acompanha_os_dados_locais(dir_dados_real, tmp_path):
+    """A versão publicada guarda a versão dos dados de que foi gerada; o painel local regera quando ela muda."""
+    arquivo_chave = dir_dados_real / ".chave_pseudonimizacao"
+    if not arquivo_chave.exists():
+        pytest.skip("chave de pseudonimização local não encontrada")
+    local = Repositorio(dir_dados_real / "eti.sqlite3")
+    destino = tmp_path / "publicado"
+    assert not publicacao.desatualizada(destino, local.versao())  # sem pasta publicada, nada a regerar
+    info = publicacao.gerar(dir_dados_real / "eti.sqlite3", arquivo_chave.read_text().strip(), destino, local.versao())
+    assert info["versao"] == local.versao()
+    assert not publicacao.desatualizada(destino, local.versao())
+    assert publicacao.desatualizada(destino, "outra versão dos dados")
+    # A data da lista da plataforma vai junto: o painel online mostra a mesma posição
+    online = Repositorio(destino / "eti.sqlite3")
+    for fonte in ("cadastro", "atividade", "escolas"):
+        ativa_local, ativa_online = local.importacao_ativa(fonte), online.importacao_ativa(fonte)
+        if ativa_local:
+            assert (ativa_online["referencia_em"], ativa_online["referencia_descricao"]) == (
+                ativa_local["referencia_em"], ativa_local["referencia_descricao"]), fonte

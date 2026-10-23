@@ -9,7 +9,9 @@ from __future__ import annotations
 
 import json
 import math
+from collections import Counter
 from dataclasses import dataclass, field
+from datetime import date, timedelta
 
 import pandas as pd
 
@@ -37,6 +39,38 @@ FILTROS = (
     ("municipio_escola", "Município da escola"),
 )
 FILTROS_PRINCIPAIS = ("regiao", "uf", "ente", "ciclo")
+
+# Grupos da galeria de cursistas (os destaques da Visão geral levam direto a eles)
+GRUPO_TODAS = "Todas as pessoas"
+GRUPO_ACOMPANHAMENTO = "Requerem acompanhamento"
+GRUPO_NUNCA = "Nunca acessaram"
+GRUPO_SEM_CONTA = "Sem conta na plataforma"
+GRUPO_CONCILIACAO = "Conta em conciliação"
+
+
+def grupo_recentes(janela: int) -> str:
+    return f"Acesso nos últimos {janela} dias"
+
+
+def grupo_inativos(limite: int) -> str:
+    return f"Sem acesso há mais de {limite} dias"
+
+
+# Perfil (cadastro) e contexto da escola (Censo): colunas levadas também às contas vinculadas
+DIMENSOES_PERFIL = (
+    ("Cargo ou função", "cargo_funcao"), ("Origem da vaga", "origem"), ("Escolaridade", "escolaridade"),
+    ("Esfera", "esfera"), ("Semana da inscrição", "semana_inscricao"),
+)
+DIMENSOES_ESCOLA = (
+    ("Localização da escola", "localizacao"), ("Área diferenciada", "localizacao_diferenciada"),
+    ("Internet na escola", "internet_escola"), ("Banda larga na escola", "banda_larga_escola"),
+)
+COLUNAS_PERFIL = tuple(c for _, c in (*DIMENSOES_PERFIL, *DIMENSOES_ESCOLA))
+
+# Categorias que vêm sem acento na planilha: muda só a exibição, o valor gravado fica como veio
+ROTULOS_EXIBICAO = {"escolaridade": {"Especializacao": "Especialização", "Medio": "Médio"}}
+# Ordem de exibição das categorias que têm ordem própria (as demais seguem a ordem alfabética/natural)
+ORDENS = {"escolaridade": ("Fundamental", "Medio", "Superior", "Especializacao", "Mestrado", "Doutorado")}
 
 
 def rotulos_faixas(limites: list[int]) -> list[str]:
@@ -121,7 +155,7 @@ def _problemas_longos(registros: pd.DataFrame, coluna_id: str, mapeamento: dict)
     return tabela_problemas(registros, coluna_id, cabecalhos)
 
 
-def montar_base(repo: Repositorio) -> Base:
+def montar_base(repo: Repositorio, fuso: str = "America/Sao_Paulo") -> Base:
     parametros = repo.parametros()
     limites = parametros["faixas_inatividade_dias"]
     limite_acomp = parametros["limite_acompanhamento_dias"]
@@ -140,6 +174,9 @@ def montar_base(repo: Repositorio) -> Base:
     for coluna in ("eh_cursista", "eh_equipe"):
         atv[coluna] = pd.to_numeric(atv[coluna], errors="coerce").fillna(0).astype(int)
     atv["acesso_segundos"] = pd.to_numeric(atv["acesso_segundos"], errors="coerce")
+    # Dia do último acesso no fuso do painel: só existe quando a lista tem data de referência
+    momentos = pd.to_datetime(atv["acesso_momento"], errors="coerce", utc=True)
+    atv["acesso_dia"] = momentos.dt.tz_convert(fuso).dt.strftime("%Y-%m-%d")
     decisoes = repo.decisoes()
 
     resultado = rc.conciliar(cad, atv, decisoes) if not cad.empty else None
@@ -162,7 +199,7 @@ def montar_base(repo: Repositorio) -> Base:
         cursistas = cursistas.assign(status_conciliacao=None, regra_conciliacao=None, id_conta=None)
     campos_conta = ["id_conta", "nome_completo", "email", "papeis", "grupos", "lista_grupos", "situacao_conta",
                     "conta_ativa", "ultimo_acesso_texto", "acesso_tipo", "acesso_segundos", "acesso_momento",
-                    "acesso_base", "faixa_acesso", "dias_sem_acesso", "eh_cursista", "eh_equipe"]
+                    "acesso_dia", "acesso_base", "faixa_acesso", "dias_sem_acesso", "eh_cursista", "eh_equipe"]
     contas_resumo = atv[campos_conta].rename(columns={"nome_completo": "conta_nome", "email": "conta_email"})
     cursistas = cursistas.merge(contas_resumo, on="id_conta", how="left")
     ha_atividade = not atv.empty
@@ -192,6 +229,9 @@ def montar_base(repo: Repositorio) -> Base:
     ]
     cursistas["prioridade"] = pd.array(prioridades, dtype="Int64")
     cursistas = school_data.enriquecer(cursistas, esc)
+    atributos = school_data.tabela_atributos(esc)
+    cursistas["semana_inscricao"] = semana_de(cursistas["data_resposta"])
+    cursistas["internet_escola"], cursistas["banda_larga_escola"] = _conectividade(cursistas["inep"], atributos)
     cursistas["grupo"] = cursistas["lista_grupos"].map(", ".join).replace("", None)
     # Busca por nome, escola (informada e oficial), ente, município da escola, turma e código INEP
     cursistas["texto_busca"] = [
@@ -200,19 +240,20 @@ def montar_base(repo: Repositorio) -> Base:
                           cursistas["municipio_escola"], cursistas["grupo"], cursistas["inep"].fillna(""))
     ]
 
-    # Atributos territoriais da pessoa vinculada, para filtrar contas por território
+    # Território, perfil e escola da pessoa vinculada: para filtrar e comparar as contas
+    colunas_vinculo = ["uf", "ente", "articulador", "ciclo", *COLUNAS_PERFIL]
     if resultado is not None and not resultado.associacoes.empty:
-        vinculo = (resultado.associacoes.merge(cad[["id_registro", "uf", "ente", "articulador", "ciclo"]], on="id_registro")
-                   .drop_duplicates("id_conta")[["id_conta", "uf", "ente", "articulador", "ciclo"]])
+        vinculo = (resultado.associacoes.merge(cursistas[["id_registro", *colunas_vinculo]], on="id_registro")
+                   .drop_duplicates("id_conta")[["id_conta", *colunas_vinculo]])
         contas = contas.merge(vinculo, on="id_conta", how="left")
     else:
-        contas = contas.assign(uf=None, ente=None, articulador=None, ciclo=None)
+        contas = contas.assign(**dict.fromkeys(colunas_vinculo))
 
     return Base(
         cursistas=cursistas,
         contas=contas,
         escolas=esc,
-        atributos_escolas=school_data.tabela_atributos(esc),
+        atributos_escolas=atributos,
         associacoes=resultado.associacoes if resultado else pd.DataFrame(),
         candidatos=resultado.candidatos if resultado else pd.DataFrame(),
         problemas_cadastro=_problemas_longos(cad, "id_registro", (meta["cadastro"] or {}).get("mapeamento")),
@@ -222,6 +263,114 @@ def montar_base(repo: Repositorio) -> Base:
         parametros=parametros,
         alertas_conciliacao=resultado.alertas if resultado else [],
     )
+
+
+def semana_de(datas: pd.Series) -> pd.Series:
+    """Segunda-feira da semana de cada data (AAAA-MM-DD), para agrupar as respostas às inscrições."""
+    dias = pd.to_datetime(datas, errors="coerce", format="%Y-%m-%d")
+    return (dias - pd.to_timedelta(dias.dt.weekday, unit="D")).dt.strftime("%Y-%m-%d")
+
+
+def _conectividade(inep: pd.Series, atributos: pd.DataFrame) -> tuple[pd.Series, pd.Series]:
+    """Internet e banda larga da escola segundo o Censo; vazio quando a escola não foi localizada."""
+    if atributos.empty or "IN_INTERNET" not in atributos:
+        return pd.Series(None, index=inep.index, dtype=object), pd.Series(None, index=inep.index, dtype=object)
+    tabela = atributos.drop_duplicates("co_entidade").set_index("co_entidade")
+    internet = inep.map(tabela["IN_INTERNET"])
+    banda = inep.map(tabela["IN_BANDA_LARGA"]) if "IN_BANDA_LARGA" in tabela else pd.Series(None, index=inep.index)
+    texto_internet = internet.map({"1": "Com internet", "0": "Sem internet"})
+    # O Censo só pergunta sobre banda larga a quem tem internet: sem internet, não há banda larga
+    texto_banda = banda.map({"1": "Com banda larga", "0": "Sem banda larga"}).where(
+        banda.notna(), internet.map({"0": "Sem banda larga"}))
+    return texto_internet, texto_banda
+
+
+def rotulo(coluna: str, valor) -> str:
+    """Texto de exibição de uma categoria; o valor original não muda."""
+    if coluna == "semana_inscricao" and isinstance(valor, str):
+        inicio = date.fromisoformat(valor)
+        return f"{inicio:%d/%m} a {inicio + timedelta(days=6):%d/%m}"
+    return ROTULOS_EXIBICAO.get(coluna, {}).get(valor, valor)
+
+
+def chave_ordem(coluna: str, valor):
+    """Chave de ordenação das categorias de uma coluna (ordem própria, quando há, ou ordem natural)."""
+    ordem = ORDENS.get(coluna)
+    if ordem and valor in ordem:
+        return (0, ordem.index(valor), [])
+    return (1, 0, ordem_natural(valor))
+
+
+def classes_de_dias(dias: pd.Series, limites: list[int], marcas: tuple[int, ...] = ()) -> pd.DataFrame:
+    """Classes do histograma do tempo sem acesso (em dias), cada uma dentro de uma única faixa de acesso.
+
+    As bordas são as das faixas, as ``marcas`` (janela de acesso recente, limite de acompanhamento) e
+    valores "redondos" entre elas; classes vazias depois do maior valor observado são omitidas.
+    """
+    l1, l2, l3 = limites
+    rotulos = rotulos_faixas(limites)
+    faixas = [(0, l1, rotulos[0]), (l1, l2, rotulos[1]), (l2, l3, rotulos[2]), (l3, math.inf, rotulos[3])]
+    candidatas = sorted({1, 2, 3, 5, 7, 10, 14, 21, 30, 45, 60, 90, 120, 180, 365, *limites, *marcas})
+    valores = pd.to_numeric(dias, errors="coerce").dropna()
+    maximo = float(valores.max()) if not valores.empty else 0.0
+    linhas = []
+    for inicio, fim, faixa in faixas:
+        bordas = [inicio, *[b for b in candidatas if inicio < b < fim], fim]
+        for a, b in zip(bordas, bordas[1:]):
+            if a > maximo and linhas:
+                break
+            # As faixas são [0, l1), [l1, l2), [l2, l3] e (l3, ∞): a borda l3 fica na terceira faixa
+            if faixa == rotulos[2] and b == l3:
+                dentro = (valores >= a) & (valores <= b)
+            elif faixa == rotulos[3] and a == l3:
+                dentro = (valores > a) & (valores < b)
+            else:
+                dentro = (valores >= a) & (valores < b)
+            linhas.append({"inicio": a, "fim": b, "faixa": faixa, "contagem": int(dentro.sum())})
+    return pd.DataFrame(linhas, columns=["inicio", "fim", "faixa", "contagem"])
+
+
+def resumo_turmas(contas: pd.DataFrame, janela: int, limite: int) -> pd.DataFrame:
+    """Uma linha por turma (grupo da plataforma), com os estudantes e a situação de acesso de cada um.
+
+    Estudantes são as contas com papel de cursista; a equipe (formadores, coordenação, suporte) só é
+    contada por papel. Uma conta em duas turmas conta nas duas.
+    """
+    colunas = ["grupo", "rotulo", "estado", "numero", "estudantes", "acessaram", "nunca", "recentes", "inativos",
+               "atencao", "taxa_acesso", "faixas", "equipe"]
+    turmas: dict[str, dict] = {}
+    for conta in contas.itertuples(index=False):
+        for grupo in conta.lista_grupos:
+            item = turmas.setdefault(grupo, {"grupo": grupo, "estudantes": 0, "acessaram": 0, "nunca": 0,
+                                             "recentes": 0, "inativos": 0, "atencao": 0, "faixas": [],
+                                             "equipe": Counter()})
+            if conta.eh_equipe == 1:
+                for papel in (conta.papeis if isinstance(conta.papeis, str) else "").split(","):
+                    if papel.strip():
+                        item["equipe"][papel.strip()] += 1
+            if conta.eh_cursista != 1:
+                continue
+            dias = conta.dias_sem_acesso
+            nunca = conta.acesso_tipo == "nunca"
+            inativa = not pd.isna(dias) and dias > limite
+            item["estudantes"] += 1
+            item["acessaram"] += conta.acesso_tipo in ("relativo", "absoluto")
+            item["nunca"] += nunca
+            item["recentes"] += not pd.isna(dias) and dias <= janela
+            item["inativos"] += inativa
+            item["atencao"] += nunca or inativa or not bool(conta.conta_ativa)
+            item["faixas"].append(conta.faixa_acesso)
+    linhas = []
+    for item in turmas.values():
+        if not item["estudantes"]:
+            continue
+        identificada = turma(item["grupo"])
+        item["estado"], item["numero"] = identificada if identificada else (None, None)
+        item["rotulo"] = f"{identificada[0]} · T{identificada[1]}" if identificada else item["grupo"]
+        item["taxa_acesso"] = item["acessaram"] / item["estudantes"]
+        item["equipe"] = dict(item["equipe"])
+        linhas.append(item)
+    return pd.DataFrame(linhas, columns=colunas)
 
 
 def turma(grupo: str) -> tuple[str, int] | None:
@@ -354,14 +503,14 @@ class Contexto:
         return any(self.filtros.values())
 
 
-def carregar_base(repo: Repositorio) -> Base:
+def carregar_base(repo: Repositorio, fuso: str = "America/Sao_Paulo") -> Base:
     import streamlit as st
 
     @st.cache_data(show_spinner="Carregando dados…", max_entries=6, ttl=3600)
-    def _carregar(caminho: str, versao: str, retencao: int) -> Base:
-        return montar_base(Repositorio(caminho, retencao))
+    def _carregar(caminho: str, versao: str, retencao: int, fuso: str) -> Base:
+        return montar_base(Repositorio(caminho, retencao), fuso)
 
-    return _carregar(str(repo.caminho), repo.versao(), repo.retencao)
+    return _carregar(str(repo.caminho), repo.versao(), repo.retencao, fuso)
 
 
 def contexto():

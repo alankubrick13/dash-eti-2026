@@ -77,12 +77,20 @@ def tempo_desde(segundos) -> str | None:
 # ---------------------------------------------------------------- situação de uma pessoa
 
 
+def dia_curto(dia) -> str | None:
+    """"2026-10-18" -> "18/10" (dia do último acesso, quando a lista tem data de referência)."""
+    if not isinstance(dia, str) or len(dia) != 10:
+        return None
+    return f"{dia[8:10]}/{dia[5:7]}"
+
+
 def situacao(pessoa, cores: dict[str, str]) -> tuple[str, str]:
     """(texto, cor) da situação na plataforma, para avatar e etiqueta."""
     faixa = pessoa.faixa_acesso
     cor = cores.get(faixa, graficos.CINZA_SEM_CONTA)
     if pessoa.acesso_tipo in ("relativo", "absoluto"):
-        return f"Último acesso {tempo_desde(pessoa.acesso_segundos) or ''}".strip(), cor
+        dia = dia_curto(getattr(pessoa, "acesso_dia", None))
+        return f"Último acesso {tempo_desde(pessoa.acesso_segundos) or ''}".strip() + (f" ({dia})" if dia else ""), cor
     if pessoa.acesso_tipo == "nunca":
         return "Nunca acessou", cor
     if pessoa.status_conciliacao in (rc.PENDENTE, rc.AMBIGUO):
@@ -237,6 +245,188 @@ def cartao_escola(escola, faixas: list[str], cores: dict[str, str], com_local: b
         f'<div style="width:{fracao * 100:.1f}%"></div></div>'
         f'<div class="eti-cartao-rodape"><span class="eti-cartao-resumo">{resumo}</span>'
         f'{alerta(f"{nunca} nunca acess" + ("aram" if nunca > 1 else "ou")) if nunca else ""}</div></div>'
+    )
+
+
+def cartao_turma(turma, cores: dict[str, str], limite: int) -> str:
+    """Cartão de uma turma da plataforma: estudantes, quem já entrou e quem precisa de atenção."""
+    estudantes, acessaram = int(turma.estudantes), int(turma.acessaram)
+    fracao = acessaram / estudantes if estudantes else 0
+    estado = turma.estado if not eh_vazio(turma.estado) else "Turma da plataforma"
+    titulo = f"Turma {turma.numero}" if not eh_vazio(turma.numero) else turma.grupo
+    alertas = ""
+    if turma.nunca:
+        alertas += alerta(f"{turma.nunca} nunca acess" + ("aram" if turma.nunca > 1 else "ou"))
+    if turma.inativos:
+        alertas += alerta(f"{turma.inativos} há mais de {limite} dias")
+    return (
+        f'<div class="eti-cartao eti-cartao-turma"><div class="eti-cartao-chamada">{_ICONE.format("groups")}'
+        f'{_e(estado)}</div><div class="eti-cartao-titulo">{_e(titulo)}</div>'
+        f'<div class="eti-cartao-sub">Grupo “{_e(turma.grupo)}” na plataforma</div>'
+        f'<div class="eti-cartao-meio"><div class="eti-cartao-contagem">{estudantes} estudante{"s" if estudantes != 1 else ""}'
+        f'</div>{pontos(turma.faixas, cores, limite=60)}</div>'
+        f'<div class="eti-progresso" title="{_e(f"{acessaram} de {estudantes} já acessaram")}">'
+        f'<div style="width:{fracao * 100:.1f}%"></div></div>'
+        f'<div class="eti-cartao-rodape"><span class="eti-cartao-resumo"><b>{acessaram} de {estudantes}</b> já acessaram'
+        f'</span>{alertas}</div></div>'
+    )
+
+
+def _email_legivel(texto) -> str | None:
+    """E-mail (parcial ou completo) para exibir; None quando só restaria a máscara (na versão publicada os e-mails
+    viram códigos e a máscara mostraria apenas "•••")."""
+    return texto if isinstance(texto, str) and "@" in texto else None
+
+
+def linha_conta(conta) -> str:
+    """Conta da plataforma sem registro no cadastro (nome como está na plataforma; e-mail parcial)."""
+    from .security import mascarar_email
+
+    partes = [conta.papeis if not eh_vazio(conta.papeis) else "Sem papel", turma_legivel(conta) or "Sem turma",
+              _email_legivel(mascarar_email(conta.email))]
+    acesso = conta.ultimo_acesso_texto if not eh_vazio(conta.ultimo_acesso_texto) else "não informado"
+    return (
+        f'<div class="eti-linha-pessoa eti-linha-conta">{avatar(conta.nome_completo, graficos.CINZA_SEM_CONTA, "eti-avatar-p")}'
+        f'<div class="eti-cartao-id"><div class="eti-cartao-titulo">{_e(nome_legivel(conta.nome_completo))}</div>'
+        f'<div class="eti-cartao-sub">{_e(" · ".join(p for p in partes if p))}</div></div>'
+        f'<div class="eti-linha-situacao">{etiqueta(f"Último acesso: {acesso}")}</div></div>'
+    )
+
+
+def linha_municipio(municipio: str, dados, cor_barra: str = graficos.CALOR_MAX) -> str:
+    """Linha do ranking de municípios: cursistas, escolas, barra de acesso e quem nunca acessou."""
+    com_conta, acessaram, nunca = int(dados.com_conta), int(dados.acessaram), int(dados.nunca)
+    fracao = acessaram / com_conta if com_conta else 0
+    resumo = f"<b>{acessaram} de {com_conta}</b> já acessaram" if com_conta else "Ninguém com conta na plataforma"
+    pessoas, escolas = int(dados.pessoas), int(dados.escolas)
+    return (
+        f'<div class="eti-linha-municipio"><div class="eti-cartao-id"><div class="eti-cartao-titulo">{_e(municipio)}</div>'
+        f'<div class="eti-cartao-sub">{pessoas} cursista{"s" if pessoas != 1 else ""} · '
+        f'{escolas} escola{"s" if escolas != 1 else ""}</div></div>'
+        f'<div class="eti-linha-municipio-acesso"><div class="eti-progresso"><div style="width:{fracao * 100:.1f}%;'
+        f'background:{cor_barra}"></div></div><span class="eti-cartao-resumo">{resumo}</span></div>'
+        f'<div class="eti-linha-situacao">{alerta(f"{nunca} nunca acess" + ("aram" if nunca > 1 else "ou")) if nunca else ""}'
+        f'</div><span class="eti-icone eti-seta" aria-hidden="true">chevron_right</span></div>'
+    )
+
+
+def linha_pendencia(pessoa, problemas: list[str], cores: dict[str, str]) -> str:
+    """Registro com dado a corrigir na fonte: pessoa, escola informada e os problemas encontrados."""
+    _, cor = situacao(pessoa, cores)
+    local = " · ".join(x for x in (_municipio(pessoa), nome_legivel(pessoa.escola) if not eh_vazio(pessoa.escola) else None)
+                       if x)
+    chips = "".join(alerta(p) for p in problemas)
+    return (
+        f'<div class="eti-linha-pessoa">{avatar(pessoa.nome, cor, "eti-avatar-p")}'
+        f'<div class="eti-cartao-id"><div class="eti-cartao-titulo">{_e(nome_legivel(pessoa.nome))}</div>'
+        f'<div class="eti-cartao-sub">{_e(local or "Sem ente e escola")} · {_e(pessoa.arquivo_origem)}, linha '
+        f'{_e(pessoa.linha_origem)}</div></div><div class="eti-linha-situacao">{chips}</div>'
+        f'<span class="eti-icone eti-seta" aria-hidden="true">chevron_right</span></div>'
+    )
+
+
+ICONES_FONTE = {"cadastro": "badge", "atividade": "school", "escolas": "domain"}
+ROTULOS_FONTE = {"cadastro": "Cadastro dos cursistas", "atividade": "Lista da plataforma",
+                 "escolas": "Base escolar do Inep"}
+
+
+def importacao(imp, quando: str, arquivos: str) -> str:
+    """Item da linha do tempo das importações (uma por versão de cada base)."""
+    ativa = imp.status == "ativa"
+    situacao_texto = "em uso" if ativa else str(imp.status)
+    registros = f"{metrics.numero(imp.n_registros)} registros"
+    if imp.n_com_problemas:
+        registros += f" · {metrics.numero(imp.n_com_problemas)} com problemas"
+    if imp.n_duplicados:
+        registros += f" · {metrics.numero(imp.n_duplicados)} em duplicidade"
+    return (
+        f'<li class="eti-importacao{" eti-importacao-ativa" if ativa else ""}">'
+        f'<span class="eti-importacao-marca" aria-hidden="true">{_ICONE.format(ICONES_FONTE.get(imp.fonte, "description"))}</span>'
+        f'<div><div class="eti-importacao-titulo">{_e(ROTULOS_FONTE.get(imp.fonte, imp.fonte))} '
+        f'{etiqueta(situacao_texto, graficos.PETROLEO[0] if ativa else graficos.CINZA_NUNCA)}</div>'
+        f'<div class="eti-importacao-detalhe">Nº {_e(imp.id)} · {_e(quando)} · {_e(imp.importado_por)} · {_e(registros)}</div>'
+        + (f'<div class="eti-importacao-detalhe">{_e(imp.referencia_descricao)}</div>'
+           if not eh_vazio(imp.referencia_descricao) else "")
+        + f'<div class="eti-importacao-arquivos">{_ICONE.format("description")}{_e(arquivos)}</div></div></li>'
+    )
+
+
+# ---------------------------------------------------------------- destaques e verificações
+
+
+def destaque(icone: str, valor: str, titulo: str, texto: str, com_seta: bool = True) -> str:
+    """Cartão de destaque da Visão geral: ícone, número grande, o que ele conta e a população de referência."""
+    seta = '<span class="eti-icone eti-seta" aria-hidden="true">arrow_forward</span>' if com_seta else ""
+    return (
+        f'<div class="eti-destaque"><span class="eti-destaque-icone" aria-hidden="true">{_ICONE.format(_e(icone))}</span>'
+        f'<div class="eti-destaque-valor">{_e(valor)}</div><div class="eti-destaque-titulo">{_e(titulo)}</div>'
+        f'<p class="eti-destaque-texto">{_e(texto)}</p>{seta}</div>'
+    )
+
+
+ESTADOS_VERIFICACAO = {"ok": "check", "atencao": "priority_high", "info": "info"}
+
+
+def verificacao(estado: str, titulo: str, valor: str, detalhe: str | None = None, com_seta: bool = False) -> str:
+    """Item da checagem dos dados: estado ("ok", "atencao", "info"), número e explicação curta."""
+    seta = '<span class="eti-icone eti-seta" aria-hidden="true">chevron_right</span>' if com_seta else ""
+    return (
+        f'<div class="eti-verificacao eti-verificacao-{estado}"><span class="eti-verificacao-marca" aria-hidden="true">'
+        f'{_ICONE.format(ESTADOS_VERIFICACAO[estado])}</span><div class="eti-verificacao-corpo">'
+        f'<div class="eti-verificacao-valor">{_e(valor)}</div><div class="eti-verificacao-titulo">{_e(titulo)}</div>'
+        + (f'<div class="eti-verificacao-detalhe">{_e(detalhe)}</div>' if detalhe else "")
+        + f"</div>{seta}</div>"
+    )
+
+
+def sugestao_conciliacao(par, mostrar_email) -> str:
+    """Sugestão de associação: o registro do cadastro e a conta da plataforma lado a lado."""
+    local = " · ".join(x for x in (f"{par.ente} ({par.uf})" if not eh_vazio(par.ente) else None,
+                                   nome_legivel(par.escola) if not eh_vazio(par.escola) else None) if x)
+    turma = turma_legivel(par) or (par.grupos if not eh_vazio(par.grupos) else "Sem turma")
+    acesso = par.ultimo_acesso_texto if not eh_vazio(par.ultimo_acesso_texto) else "não informado"
+    semelhanca = f"{float(par.similaridade) * 100:.0f}%" if not eh_vazio(par.similaridade) else "—"
+    email_cadastro, email_conta = _email_legivel(mostrar_email(par.email)), _email_legivel(mostrar_email(par.email_conta))
+    return (
+        '<div class="eti-par">'
+        f'<div class="eti-par-lado"><div class="eti-par-rotulo">{_ICONE.format("badge")}Cadastro</div>'
+        f'<div class="eti-par-nome">{_e(nome_legivel(par.nome))}</div>'
+        f'<div class="eti-par-detalhe">{_e(local or "Ente e escola não informados")}</div>'
+        + (f'<div class="eti-par-detalhe">{_e(email_cadastro)}</div>' if email_cadastro else "") + "</div>"
+        f'<div class="eti-par-meio"><span class="eti-icone" aria-hidden="true">sync_alt</span>'
+        f'<div class="eti-par-semelhanca">{semelhanca}</div><small>semelhança dos nomes</small></div>'
+        f'<div class="eti-par-lado"><div class="eti-par-rotulo">{_ICONE.format("school")}Plataforma</div>'
+        f'<div class="eti-par-nome">{_e(nome_legivel(par.nome_completo))}</div>'
+        f'<div class="eti-par-detalhe">{_e(turma)} · último acesso: {_e(acesso)}</div>'
+        + (f'<div class="eti-par-detalhe">{_e(email_conta)}</div>' if email_conta else "") + "</div>"
+        f'<div class="eti-par-motivo">{_e(par.motivo)}</div></div>'
+    )
+
+
+def fonte_dados(icone: str, titulo: str, texto: str, itens: list[tuple[str, str | tuple[str, str]]]) -> str:
+    """Cartão de uma fonte de dados (página Sobre): o que é, de onde vem e os números da versão em uso.
+
+    Um valor pode ser um par (texto, endereço), exibido como link.
+    """
+    def valor(v) -> str:
+        if isinstance(v, tuple):
+            texto_link, endereco = v
+            return f'<a href="{_e(endereco)}" target="_blank" rel="noopener noreferrer">{_e(texto_link)}</a>'
+        return _e(v)
+
+    pares = "".join(f"<dt>{_e(r)}</dt><dd>{valor(v)}</dd>" for r, v in itens if v)
+    return (f'<div class="eti-fonte"><div class="eti-fonte-topo">{_ICONE.format(_e(icone))}<span>{_e(titulo)}</span></div>'
+            f'<p>{_e(texto)}</p><dl class="eti-dl eti-dl-compacta">{pares}</dl></div>')
+
+
+def definicao_indicador(indicador) -> str:
+    """Cartão com a definição documentada de um indicador (``metrics.Indicador``)."""
+    return (
+        f'<div class="eti-indicador"><div class="eti-indicador-topo"><span class="eti-indicador-nome">{_e(indicador.nome)}'
+        f'</span>{etiqueta(indicador.unidade)}</div><p>{_e(indicador.definicao)}</p>'
+        f'<div class="eti-indicador-formula">{_ICONE.format("function")}<span>{_e(indicador.formula)}</span></div>'
+        f'<dl class="eti-dl eti-dl-compacta"><dt>Valores ausentes</dt><dd>{_e(indicador.ausentes)}</dd>'
+        f'<dt>Limitações</dt><dd>{_e(indicador.limitacoes)}</dd></dl></div>'
     )
 
 

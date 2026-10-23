@@ -1,18 +1,18 @@
-"""Atividade e participação na plataforma de formação."""
+"""Atividade e turmas: uso da plataforma de formação e acompanhamento turma a turma."""
 
 import pandas as pd
 import streamlit as st
 
-from src import graficos, metrics, painel, ui
+from src import cartoes, fichas, graficos, metrics, painel, ui
 from src import reconciliation as rc
 from src.normalization import chave_comparacao
-from src.security import mascarar_email
 
 ctx = painel.contexto()
 base = ctx.base
+fuso = ctx.cfg.fuso_horario
 ui.titulo_pagina(
-    "Atividade e participação",
-    "Uso da plataforma segundo a exportação de participantes. Situação da conta e atividade são coisas "
+    "Atividade e turmas",
+    "Uso da plataforma segundo a lista de participantes, turma a turma. Situação da conta e atividade são coisas "
     "diferentes: uma conta ativa pode estar sem acesso há semanas.",
 )
 ui.recorte(ctx)
@@ -26,9 +26,10 @@ ui.nota(
     "conclusão de atividades nem desempenho."
 )
 limites = base.parametros["faixas_inatividade_dias"]
+janela, limite = base.parametros["janela_acesso_recente_dias"], base.parametros["limite_acompanhamento_dias"]
 ordem_faixas = painel.ordem_faixas(limites)[:-1]  # contas sempre existem: sem a faixa "sem conta"
 cores = graficos.cores_faixas(painel.ordem_faixas(limites))
-fonte = ui.fonte_atividade(base, ctx.cfg.fuso_horario)
+fonte = ui.fonte_atividade(base, fuso)
 
 papeis_por_conta = ctx.contas["papeis"].fillna("Sem papel").map(lambda p: [x.strip() for x in p.split(",") if x.strip()])
 papeis = sorted({p for lista in papeis_por_conta for p in lista})
@@ -37,41 +38,97 @@ papel_sel = st.multiselect("Papéis na plataforma", papeis, default=padrao or pa
                            help="Por padrão, apenas os papéis definidos como de cursista nos parâmetros operacionais.")
 contas = ctx.contas[papeis_por_conta.map(lambda lista: bool(set(lista) & set(papel_sel)))] if papel_sel else ctx.contas.iloc[0:0]
 
-r = metrics.calcular_contas(contas, base.parametros["janela_acesso_recente_dias"])
-ui.indicadores([r["contas_recorte"], r["pct_situacao_ativa"], r["pct_com_acesso"], r["pct_acesso_recente_contas"], r["contas_nunca"]], colunas=5)
+r = metrics.calcular_contas(contas, janela)
+ui.indicadores([r["contas_recorte"], r["pct_situacao_ativa"], r["pct_com_acesso"], r["pct_acesso_recente_contas"],
+                r["contas_nunca"]], colunas=5, chave="contas")
 if contas.empty:
     st.stop()
 
-esquerda, direita = ui.colunas([3, 2], "atividade_principal")
-with esquerda:
-    contagem = contas["faixa_acesso"].value_counts().reindex(ordem_faixas).dropna()
-    contagem = contagem[contagem > 0]
-    total = int(contagem.sum())
-    fig = graficos.barras_horizontais(
-        contagem.index.tolist(), contagem.astype(int).tolist(), "Tempo desde o último acesso ao curso",
-        f"Contas no recorte ({metrics.numero(total)}), na data de referência da base de atividade",
-        rotulos=[f"{metrics.numero(v)} ({metrics.percentual(v / total)})" for v in contagem],
-        cores=[cores[f] for f in contagem.index],
-    )
-    ui.grafico(fig, contagem.rename_axis("Faixa").reset_index(name="Contas"), "atividade_faixas", fonte=fonte)
-with direita:
-    situacoes = contas["situacao_conta"].fillna("Não informada").value_counts()
-    fig = graficos.barras_horizontais(
-        situacoes.index.tolist(), situacoes.tolist(), "Situação das contas na plataforma",
-        "Situação da inscrição no curso, como exportada",
-        rotulos=[metrics.numero(v) for v in situacoes],
-    )
-    ui.grafico(fig, situacoes.rename_axis("Situação").reset_index(name="Contas"), "atividade_situacao", fonte=fonte)
+fig = ui.histograma_acesso(
+    contas["dias_sem_acesso"], int((contas["acesso_tipo"] == "nunca").sum()), base, fuso, "contas",
+    subtitulo=f"Contas com os papéis selecionados ({metrics.numero(len(contas))}) pelo tempo desde o último acesso. "
+              f"Tracejado: últimos {janela} dias e limite de acompanhamento ({limite} dias)",
+)
+classes = painel.classes_de_dias(contas["dias_sem_acesso"], limites, (janela, limite))
+ui.grafico(fig, classes.rename(columns={"inicio": "De (dias)", "fim": "Até (dias)", "faixa": "Faixa",
+                                        "contagem": "Contas"}), "atividade_tempo", fonte=fonte,
+           chamada_texto=ui.chamada(base), destaque=True)
 
-ui.secao("Comparação entre grupos e territórios",
-         "Composição do tempo desde o último acesso. Contas sem vínculo no cadastro aparecem como tal "
-         "nas comparações territoriais.")
-DIMENSOES = {"Estado da turma": "estado_turma", "Turma": "grupo", "UF do cadastro": "uf", "Ciclo": "ciclo",
+# ---------------------------------------------------------------- turmas
+ui.secao("Turmas",
+         "Cada cartão é uma turma da plataforma: um ponto por estudante, na cor da sua situação de acesso. "
+         "Clique em uma turma para ver quem precisa de atenção.")
+turmas = painel.resumo_turmas(ctx.contas, janela, limite)
+if turmas.empty:
+    ui.vazio("Nenhuma turma com estudantes no recorte.")
+else:
+    estados = sorted(turmas["estado"].dropna().unique(), key=chave_comparacao)
+    opcoes = [("Todas as turmas", len(turmas), graficos.TINTA)]
+    opcoes += [(e, int((turmas["estado"] == e).sum()), graficos.PETROLEO[1]) for e in estados]
+    if turmas["estado"].isna().any():
+        opcoes.append(("Outros grupos", int(turmas["estado"].isna().sum()), graficos.CINZA_NUNCA))
+    escolha = ui.filtros_em_cartoes(opcoes, len(turmas), "turmas")
+    ORDENACOES = {
+        "Atenção primeiro": "atencao",
+        "Menor taxa de acesso": "taxa",
+        "Estado e turma": "nome",
+    }
+    _, ordem_col = ui.colunas([3, 1.4], "ordem_turmas", gap="small", vertical_alignment="bottom")
+    ordenacao = ordem_col.selectbox("Ordenar", list(ORDENACOES), key="turmas_ordem", label_visibility="collapsed")
+    vista = turmas if escolha == "Todas as turmas" else (
+        turmas[turmas["estado"].isna()] if escolha == "Outros grupos" else turmas[turmas["estado"] == escolha])
+    vista = vista.assign(_atencao=vista["atencao"] / vista["estudantes"],
+                         _numero=pd.to_numeric(vista["numero"], errors="coerce"))
+    nome = ["estado", "_numero", "grupo"]
+    criterio = ORDENACOES[ordenacao]
+    if criterio == "atencao":
+        vista = vista.sort_values(["_atencao", "taxa_acesso", *nome], ascending=[False, True, True, True, True],
+                                  na_position="last", kind="stable")
+    elif criterio == "taxa":
+        vista = vista.sort_values(["taxa_acesso", *nome], na_position="last", kind="stable")
+    else:
+        vista = vista.sort_values(nome, na_position="last", kind="stable")
+    ui.nota(f"{metrics.numero(len(vista))} turma(s) em “{escolha}”, com {metrics.numero(int(vista['estudantes'].sum()))} "
+            f"estudantes. “Precisam de atenção”: nunca acessaram ou estão há mais de {limite} dias sem acesso.")
+    legenda = "".join(f'<span><i style="background:{cor}"></i>{f}</span>' for f, cor in cores.items()
+                      if f in {x for fs in vista["faixas"] for x in fs})
+    st.html(f'<div class="viz-legenda eti-legenda-pontos">{legenda}</div>')
+
+    def desenhar(i, turma) -> None:
+        ui.clicavel(cartoes.cartao_turma(turma, cores, limite), f"turma_{i}", f"Abrir a ficha da turma {turma.rotulo}",
+                    fichas.pedir, ("turma", turma.grupo))
+
+    ui.grade(list(vista.itertuples(index=False)), desenhar, "turmas")
+
+pessoas = painel.pessoas_de(ctx.cursistas)
+prioritaria = pessoas[pessoas["requer_acompanhamento"]].sort_values(["prioridade", "dias_sem_acesso"], ascending=[True, False])
+if ctx.usuario.administrador and not prioritaria.empty:
+    prioritaria = prioritaria.assign(motivos_texto=prioritaria["motivos"].map("; ".join),
+                                     prioridade_texto=prioritaria["prioridade"].map(lambda p: f"{p}" if pd.notna(p) else ""))
+    ui.exportacao_controlada(ctx, prioritaria, {
+        "prioridade_texto": "Prioridade", "motivos_texto": "Motivo", "nome": "Nome", "uf": "UF", "ente": "Ente",
+        "escola": "Escola", "grupo": "Grupo", "situacao_conta": "Situação da conta",
+        "ultimo_acesso_texto": "Último acesso (como exportado)", "articulador": "Articulador",
+    }, "lista_prioridade_verificacao.csv",
+        f"Baixar a lista de quem requer acompanhamento ({metrics.numero(len(prioritaria))} pessoas, sem contatos)")
+
+# ---------------------------------------------------------------- comparação entre grupos
+ui.secao("Comparar grupos",
+         "Composição do tempo desde o último acesso em cada grupo. O número ao lado de cada categoria é o total de "
+         "contas; contas sem vínculo no cadastro aparecem como tal nas comparações de cadastro e de escola.")
+DIMENSOES = {"Estado da turma": "estado_turma", "Turma": "grupo", "UF do cadastro": "uf",
+             **{nome: coluna for nome, coluna in painel.DIMENSOES_PERFIL},
+             **{nome: coluna for nome, coluna in painel.DIMENSOES_ESCOLA},
              "Articulador": "articulador", "Papel": "papel"}
-dimensao = st.segmented_control("Comparar por", list(DIMENSOES), default="Estado da turma", key="atividade_dimensao",
-                                help="Estado da turma: estado no nome da turma da plataforma (ex.: “Para 3” → Pará). "
-                                     "UF do cadastro: estado informado na inscrição.") or "Estado da turma"
+# Dimensões do cadastro com um único valor no recorte (ex.: Ciclo) não diferenciam ninguém: ficam de fora
+DIMENSOES = {n: c for n, c in DIMENSOES.items()
+             if c in ("estado_turma", "grupo", "papel") or contas[c].dropna().nunique() > 1}
+dimensao = st.pills("Comparar por", list(DIMENSOES), default="Estado da turma", key="atividade_dimensao",
+                    help="Estado da turma: estado no nome da turma da plataforma (ex.: “Para 3” → Pará). "
+                         "UF do cadastro: estado informado na inscrição. Localização, área diferenciada, internet e "
+                         "banda larga: dados da escola no Censo Escolar.") or "Estado da turma"
 coluna = DIMENSOES[dimensao]
+SEM_VINCULO = "Sem vínculo no cadastro"
 if coluna == "estado_turma":
     # Uma conta conta uma vez por estado, mesmo se estiver em duas turmas do mesmo estado
     estados = contas["lista_grupos"].map(
@@ -84,57 +141,24 @@ elif coluna == "grupo":
 elif coluna == "papel":
     comparacao = contas.assign(dim=papeis_por_conta.loc[contas.index]).explode("dim", ignore_index=True)
 else:
-    comparacao = contas.assign(dim=contas[coluna].fillna("Sem vínculo no cadastro"))
+    sem_dado = "Escola sem dados do Inep" if coluna in dict(painel.DIMENSOES_ESCOLA).values() else "Não informado"
+    vinculada = contas["status_conciliacao"] == rc.CORRESPONDENTE
+    comparacao = contas.assign(dim=contas[coluna].where(vinculada, SEM_VINCULO).fillna(sem_dado))
+sem_dimensao = ("Sem turma identificada", "Sem grupo", SEM_VINCULO, "Não informado", "Escola sem dados do Inep")
 tabela = pd.crosstab(comparacao["dim"], comparacao["faixa_acesso"]).reindex(
     columns=[f for f in ordem_faixas if f in set(comparacao["faixa_acesso"])], fill_value=0)
-sem_dimensao = ("Sem turma identificada", "Sem grupo", "Sem vínculo no cadastro")
-tabela = tabela.loc[sorted(tabela.index, key=lambda d: (d in sem_dimensao, painel.ordem_natural(d)))]
+tabela = tabela.loc[sorted(tabela.index, key=lambda d: (d in sem_dimensao, painel.chave_ordem(coluna, d)))]
+tabela.index = [painel.rotulo(coluna, d) for d in tabela.index]
 fig = graficos.barras_empilhadas_100(
     tabela.index.tolist(), {f: tabela[f].tolist() for f in tabela.columns}, cores,
     f"Tempo desde o último acesso, por {dimensao[0].lower() + dimensao[1:]}",
     "Contas de cada linha pelo tempo desde o último acesso; o número em cada faixa é a contagem de contas",
+    mostrar_total=True,
 )
-ui.grafico(fig, tabela.rename_axis(dimensao).reset_index(), "atividade_comparacao",
-           fonte=fonte, chamada_texto=ui.chamada(base))
+nota = None
 if coluna in ("grupo", "estado_turma"):
-    ui.nota("Uma conta em turmas de mais de um estado (ou em mais de uma turma) é contada em cada uma delas.")
-
-ui.secao("Listas para verificação")
-pessoas = painel.pessoas_de(ctx.cursistas)
-prioritaria = pessoas[pessoas["requer_acompanhamento"]].sort_values(["prioridade", "dias_sem_acesso"], ascending=[True, False])
-prioritaria = prioritaria.assign(motivos_texto=prioritaria["motivos"].map("; ".join),
-                                 prioridade_texto=prioritaria["prioridade"].map(lambda p: f"{p}" if pd.notna(p) else ""))
-nunca = pessoas[pessoas["acesso_tipo"] == "nunca"]
-sem_cadastro = contas[contas["status_conciliacao"] == rc.SEM_CORRESPONDENCIA].assign(
-    email_mascarado=lambda d: d["email"].map(mascarar_email))
-em_revisao = contas[contas["status_conciliacao"].isin([rc.PENDENTE, rc.AMBIGUO])].assign(
-    email_mascarado=lambda d: d["email"].map(mascarar_email))
-
-COLUNAS_PESSOA = {"prioridade_texto": "Prioridade", "motivos_texto": "Motivo", "nome": "Nome", "uf": "UF",
-                  "ente": "Ente", "escola": "Escola", "grupo": "Grupo", "situacao_conta": "Situação da conta",
-                  "ultimo_acesso_texto": "Último acesso (como exportado)", "articulador": "Articulador"}
-COLUNAS_CONTA = {"nome_completo": "Nome na plataforma", "email_mascarado": "E-mail (parcial)", "papeis": "Papel",
-                 "grupos": "Grupos", "situacao_conta": "Situação", "ultimo_acesso_texto": "Último acesso",
-                 "status_conciliacao": "Conciliação"}
-abas = st.tabs([
-    f"Prioridade de verificação ({metrics.numero(len(prioritaria))})",
-    f"Sem registro de acesso ({metrics.numero(len(nunca))})",
-    f"Contas sem correspondência no cadastro ({metrics.numero(len(sem_cadastro))})",
-    f"Contas em revisão de conciliação ({metrics.numero(len(em_revisao))})",
-])
-with abas[0]:
-    ui.nota("Prioridade 1: sem conta localizada ou sem registro de acesso; 2: conta não ativa; "
-            f"3: sem acesso há mais de {base.parametros['limite_acompanhamento_dias']} dias. "
-            "Critérios operacionais configuráveis; não indicam evasão ou desistência.")
-    ui.tabela(prioritaria, COLUNAS_PESSOA, altura=420)
-    ui.exportacao_controlada(ctx, prioritaria, COLUNAS_PESSOA, "lista_prioridade_verificacao.csv", "Baixar lista (sem contatos)")
-with abas[1]:
-    ui.tabela(nunca.assign(motivos_texto=nunca["motivos"].map("; ".join), prioridade_texto=""), COLUNAS_PESSOA, altura=420)
-with abas[2]:
-    ui.nota("Contas com os papéis selecionados sem registro correspondente no cadastro. Podem indicar inscrição "
-            "fora do cadastro, e-mail diferente ou conta da equipe com papel de cursista.")
-    ui.tabela(sem_cadastro, COLUNAS_CONTA, altura=360)
-with abas[3]:
-    ui.nota("Contas com sugestão de associação aguardando decisão. A revisão é feita em Qualidade e conciliação.")
-    ui.tabela(em_revisao, COLUNAS_CONTA, altura=360)
-    st.page_link("paginas/6_qualidade_conciliacao.py", label="Abrir a revisão de conciliação")
+    nota = "Uma conta em turmas de mais de um estado (ou em mais de uma turma) é contada em cada uma delas."
+elif coluna in dict(painel.DIMENSOES_ESCOLA).values():
+    nota = ("Dados da escola no Censo Escolar. Comparação descritiva: o curso pode ser acessado de fora da escola, "
+            "e diferenças entre grupos pequenos podem ser casuais.")
+ui.grafico(fig, tabela.rename_axis(dimensao).reset_index(), "atividade_comparacao", nota, fonte, ui.chamada(base))

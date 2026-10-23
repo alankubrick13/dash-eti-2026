@@ -177,9 +177,54 @@ def _formatar(valor, tipo: str) -> str:
     return f"{int(valor):,}".replace(",", ".")
 
 
+def _janela(municipios_geo: dict, contornos_geo: dict) -> tuple[float, float, float, float] | None:
+    """Limites do enquadramento (com 1,5% de folga), em graus: (lon mín., lon máx., lat mín., lat máx.)."""
+    caixa = limites(contornos_geo) or limites(municipios_geo)
+    if not caixa:
+        return None
+    lon0, lon1, lat0, lat1 = caixa
+    folga_lon, folga_lat = (lon1 - lon0) * 0.015, (lat1 - lat0) * 0.015
+    return lon0 - folga_lon, lon1 + folga_lon, lat0 - folga_lat, lat1 + folga_lat
+
+
+def proporcao(municipios_geo: dict, contornos_geo: dict) -> float:
+    """Largura ÷ altura do enquadramento na projeção de Mercator: o contêiner do mapa usa essa proporção,
+    para que o mapa ocupe a área toda em qualquer largura de tela (sem faixas vazias em cima e embaixo)."""
+    import math
+
+    janela = _janela(municipios_geo, contornos_geo)
+    if not janela:
+        return 1.45
+    lon0, lon1, lat0, lat1 = janela
+    y = lambda lat: math.log(math.tan(math.pi / 4 + math.radians(lat) / 2))  # noqa: E731
+    altura = y(lat1) - y(lat0)
+    return math.radians(lon1 - lon0) / altura if altura > 0 else 1.45
+
+
+def legenda_html(resumo: pd.DataFrame, metrica: str) -> str:
+    """Legenda do mapa em HTML (gradiente da métrica e a cor dos municípios sem cursistas)."""
+    import html
+
+    coluna, tipo, _ = METRICAS[metrica]
+    inicio, fim = ((ALERTA_MIN, ALERTA_MAX) if tipo == "percentual_alerta" else (graficos.CALOR_MIN, graficos.CALOR_MAX))
+    if tipo.startswith("percentual"):
+        marcas = ["0%", "50%", "100%"]
+    else:
+        maximo = int(resumo[coluna].max()) if not resumo.empty and resumo[coluna].notna().any() else 0
+        marcas = ["0", f"{maximo:,}".replace(",", ".")]
+    rotulos = "".join(f"<span>{m}</span>" for m in marcas)
+    return (f'<div class="eti-legenda-mapa"><div class="eti-legenda-mapa-escala"><b>{html.escape(metrica)}</b>'
+            f'<i style="background:linear-gradient(90deg, {inicio}, {fim})"></i><div>{rotulos}</div></div>'
+            f'<span class="eti-legenda-mapa-vazio"><i style="background:{SEM_DADOS}"></i>Sem cursistas</span></div>')
+
+
 def figura(resumo: pd.DataFrame, municipios_geo: dict, contornos_geo: dict, metrica: str,
-           selecionado: str | None = None, altura: int = 560):
-    """Mapa coroplético dos municípios: cor pela métrica escolhida; municípios sem cursistas em cinza claro."""
+           selecionado: str | None = None, altura: int | None = 560, escala: bool = True):
+    """Mapa coroplético dos municípios: cor pela métrica escolhida; municípios sem cursistas em cinza claro.
+
+    ``altura=None`` deixa o tamanho por conta do contêiner (``st.plotly_chart(height="stretch")``);
+    ``escala=False`` tira a barra de cores do gráfico (a legenda vem de ``legenda_html``).
+    """
     import plotly.graph_objects as go
 
     coluna, tipo, _ = METRICAS[metrica]
@@ -199,8 +244,8 @@ def figura(resumo: pd.DataFrame, municipios_geo: dict, contornos_geo: dict, metr
         ))
     if not com_dados.empty:
         minimo, maximo = (0.0, 1.0) if tipo.startswith("percentual") else (0, float(com_dados[coluna].max() or 1))
-        escala = ([[0, ALERTA_MIN], [1, ALERTA_MAX]] if tipo == "percentual_alerta"
-                  else [[0, graficos.CALOR_MIN], [1, graficos.CALOR_MAX]])
+        cores = ([[0, ALERTA_MIN], [1, ALERTA_MAX]] if tipo == "percentual_alerta"
+                 else [[0, graficos.CALOR_MIN], [1, graficos.CALOR_MAX]])
         textos = []
         for linha in com_dados.itertuples(index=False):
             nome, uf = nomes.get(linha.codigo, (linha.codigo, ""))
@@ -214,7 +259,7 @@ def figura(resumo: pd.DataFrame, municipios_geo: dict, contornos_geo: dict, metr
             )
         fig.add_trace(go.Choropleth(
             geojson=municipios_geo, featureidkey="properties.codarea", locations=com_dados["codigo"].tolist(),
-            z=com_dados[coluna].astype(float).tolist(), zmin=minimo, zmax=maximo, colorscale=escala,
+            z=com_dados[coluna].astype(float).tolist(), zmin=minimo, zmax=maximo, colorscale=cores, showscale=escala,
             marker_line_color=["#1F2933" if c == selecionado else "#FFFFFF" for c in com_dados["codigo"]],
             marker_line_width=[2.2 if c == selecionado else 0.5 for c in com_dados["codigo"]],
             text=textos, hovertemplate="%{text}<extra></extra>", name="municipios",
@@ -234,12 +279,13 @@ def figura(resumo: pd.DataFrame, municipios_geo: dict, contornos_geo: dict, metr
     fig.update_geos(visible=False, projection_type="mercator", bgcolor="#FFFFFF")
     # Enquadramento pelos limites da região: com fitbounds o Plotly mantém o quadro (quadrado) do
     # mapa-múndi e a região fica pequena no meio dele.
-    caixa = limites(contornos_geo) or limites(municipios_geo)
-    if caixa:
-        lon0, lon1, lat0, lat1 = caixa
-        folga_lon, folga_lat = (lon1 - lon0) * 0.015, (lat1 - lat0) * 0.015
-        fig.update_geos(lonaxis_range=[lon0 - folga_lon, lon1 + folga_lon], lataxis_range=[lat0 - folga_lat, lat1 + folga_lat])
-    fig.update_layout(height=altura, margin={"l": 0, "r": 0, "t": 0, "b": 40}, paper_bgcolor="#FFFFFF",
+    janela = _janela(municipios_geo, contornos_geo)
+    if janela:
+        lon0, lon1, lat0, lat1 = janela
+        fig.update_geos(lonaxis_range=[lon0, lon1], lataxis_range=[lat0, lat1])
+    if altura:
+        fig.update_layout(height=altura)
+    fig.update_layout(margin={"l": 0, "r": 0, "t": 0, "b": 40 if escala else 0}, paper_bgcolor="#FFFFFF",
                       font={"family": "Inter, system-ui, sans-serif", "color": graficos.TINTA}, separators=",.",
                       hoverlabel={"bgcolor": "#FFFFFF", "bordercolor": "#E4E7EB",
                                   "font": {"family": "Inter, system-ui, sans-serif", "size": 12, "color": graficos.TINTA}},

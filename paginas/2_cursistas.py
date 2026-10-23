@@ -21,17 +21,19 @@ if not base.tem_cadastro:
 pessoas = painel.pessoas_de(ctx.cursistas)
 cores = graficos.cores_faixas(painel.ordem_faixas(base.parametros["faixas_inatividade_dias"]))
 janela = base.parametros["janela_acesso_recente_dias"]
+limite = base.parametros["limite_acompanhamento_dias"]
 pendente = pessoas["status_conciliacao"].isin([rc.PENDENTE, rc.AMBIGUO])
 
 # ---------------------------------------------------------------- grupos (cartões de filtro)
-grupos = {"Todas as pessoas": (pessoas["chave_pessoa"].notna(), graficos.TINTA)}
+grupos = {painel.GRUPO_TODAS: (pessoas["chave_pessoa"].notna(), graficos.TINTA)}
 if base.tem_atividade:
     grupos |= {
-        "Requerem acompanhamento": (pessoas["requer_acompanhamento"].astype(bool), mapas.ALERTA_MAX),
-        f"Acesso nos últimos {janela} dias": (pessoas["dias_sem_acesso"].fillna(10**9) <= janela, graficos.PETROLEO[0]),
-        "Nunca acessaram": (pessoas["acesso_tipo"] == "nunca", graficos.CINZA_NUNCA),
-        "Sem conta na plataforma": ((pessoas["faixa_acesso"] == painel.FAIXA_SEM_CONTA) & ~pendente, "#9AA5B1"),
-        "Conta em conciliação": (pendente, "#D9A441"),
+        painel.GRUPO_ACOMPANHAMENTO: (pessoas["requer_acompanhamento"].astype(bool), mapas.ALERTA_MAX),
+        painel.grupo_recentes(janela): (pessoas["dias_sem_acesso"].fillna(10**9) <= janela, graficos.PETROLEO[0]),
+        painel.grupo_inativos(limite): (pessoas["dias_sem_acesso"].fillna(-1) > limite, graficos.PETROLEO[3]),
+        painel.GRUPO_NUNCA: (pessoas["acesso_tipo"] == "nunca", graficos.CINZA_NUNCA),
+        painel.GRUPO_SEM_CONTA: ((pessoas["faixa_acesso"] == painel.FAIXA_SEM_CONTA) & ~pendente, "#9AA5B1"),
+        painel.GRUPO_CONCILIACAO: (pendente, "#D9A441"),
     }
 escolha = ui.filtros_em_cartoes([(r, int(m.sum()), cor) for r, (m, cor) in grupos.items()], len(pessoas), "cursistas")
 

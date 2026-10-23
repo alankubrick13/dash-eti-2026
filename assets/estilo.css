@@ -7,7 +7,7 @@
 :root {
   --tinta: #1F2933;
   --tinta-suave: #5B6670;
-  --tinta-fraca: #7B8794;
+  --tinta-fraca: #67727E;  /* contraste 4,9:1 no branco (texto pequeno) */
   --petroleo: #0E6F7C;
   --borda: #E4E7EB;
   --fundo-2: #F4F6F7;
@@ -109,6 +109,11 @@
 .eti-modo .eti-icone {
   font-size: 0.95rem;
   color: var(--petroleo);
+}
+
+/* Links para páginas (st.page_link): o texto quebra em telas estreitas, em vez de ser cortado */
+[data-testid="stPageLink"] p {
+  white-space: normal;
 }
 
 /* ---------------------------------------------------------------- texto */
@@ -505,7 +510,8 @@ h1 {
   opacity: 0;
   cursor: pointer;
 }
-[class*="st-key-clic_"]:has(button:focus-visible) :is(.eti-cartao, .eti-filtro, .eti-linha-pessoa) {
+[class*="st-key-clic_"]:has(button:focus-visible) :is(.eti-cartao, .eti-filtro, .eti-linha-pessoa, .eti-destaque,
+                                                    .eti-verificacao, .eti-linha-municipio) {
   outline: 2px solid var(--petroleo);
   outline-offset: 2px;
 }
@@ -516,7 +522,9 @@ h1 {
  * ficam com a mesma altura.
  */
 [class*="st-key-grade_"],
-[class*="st-key-filtros_"] {
+[class*="st-key-filtros_"],
+.st-key-destaques,
+.st-key-verificacoes {
   display: grid !important;
   grid-template-columns: repeat(auto-fill, minmax(min(100%, 16.5rem), 1fr));
   gap: 0.9rem;
@@ -526,16 +534,26 @@ h1 {
   grid-template-columns: repeat(auto-fit, minmax(min(100%, 8.5rem), 1fr));
   gap: 0.6rem;
 }
-:is([class*="st-key-grade_"], [class*="st-key-filtros_"]) > [data-testid="stLayoutWrapper"] > [class*="st-key-clic_"] {
+.st-key-destaques {
+  grid-template-columns: repeat(auto-fit, minmax(min(100%, 14rem), 1fr));
+  margin: 0.2rem 0 0.6rem 0;
+}
+.st-key-verificacoes {
+  grid-template-columns: repeat(auto-fill, minmax(min(100%, 15rem), 1fr));
+  gap: 0.7rem;
+  margin-bottom: 0.9rem;
+}
+:is([class*="st-key-grade_"], [class*="st-key-filtros_"], .st-key-destaques, .st-key-verificacoes) > [data-testid="stLayoutWrapper"] > [class*="st-key-clic_"],
+:is(.st-key-destaques, .st-key-verificacoes) > [class*="st-key-clic_"] {
   height: 100%;
 }
-:is([class*="st-key-grade_"], [class*="st-key-filtros_"]) [class*="st-key-clic_"] > [data-testid="stElementContainer"]:first-child,
-:is([class*="st-key-grade_"], [class*="st-key-filtros_"]) [class*="st-key-clic_"] > [data-testid="stElementContainer"]:first-child > [data-testid="stHtml"] {
+:is([class*="st-key-grade_"], [class*="st-key-filtros_"], .st-key-destaques, .st-key-verificacoes) [class*="st-key-clic_"] > [data-testid="stElementContainer"]:first-child,
+:is([class*="st-key-grade_"], [class*="st-key-filtros_"], .st-key-destaques, .st-key-verificacoes) [class*="st-key-clic_"] > [data-testid="stElementContainer"]:first-child > [data-testid="stHtml"] {
   display: flex;
   flex-direction: column;
   flex: 1 1 auto;
 }
-:is([class*="st-key-grade_"], [class*="st-key-filtros_"]) :is(.eti-cartao, .eti-filtro) {
+:is([class*="st-key-grade_"], [class*="st-key-filtros_"], .st-key-destaques, .st-key-verificacoes) :is(.eti-cartao, .eti-filtro, .eti-destaque, .eti-verificacao) {
   flex: 1 1 auto;
 }
 
@@ -1056,11 +1074,661 @@ h1 {
   color: var(--tinta-suave);
 }
 
+/* ---------------------------------------------------------------- indicadores em cartões (ui.indicadores) */
+[class*="st-key-kpis_"] > [data-testid="stHorizontalBlock"] > [data-testid="stColumn"],
+[class*="st-key-kpis_"] > [data-testid="stLayoutWrapper"] > [data-testid="stHorizontalBlock"] > [data-testid="stColumn"] {
+  min-width: min(100%, 11rem);
+}
+[class*="st-key-kpi_"] {
+  height: 100%;
+  background: #FFFFFF;
+  border-radius: 14px !important;
+}
+/* Rótulos de uma ou duas linhas: os valores dos cartões de uma linha ficam alinhados */
+[class*="st-key-kpi_"] [data-testid="stMetricLabel"] {
+  min-height: 2.6em;
+  align-items: flex-start;
+}
+.eti-kpi-barra {
+  height: 4px;
+  margin: -0.5rem 0 0 0;
+  border-radius: 999px;
+  background: #E6EEF0;
+  overflow: hidden;
+}
+.eti-kpi-barra div {
+  height: 100%;
+  border-radius: 999px;
+  background: var(--petroleo);
+}
+.eti-kpi-barra + .eti-metrica-contexto {
+  margin-top: 0.45rem;
+}
+
+/* ---------------------------------------------------------------- destaques (Visão geral) */
+.eti-destaque {
+  position: relative;
+  display: flex;
+  flex-direction: column;
+  gap: 0.1rem;
+  padding: 1rem 1.1rem 1.05rem 1.1rem;
+  border: 1px solid #D5E5E8;
+  border-radius: 16px;
+  background: linear-gradient(180deg, #F1F7F8 0%, #FFFFFF 70%);
+  transition: border-color 0.15s ease, box-shadow 0.15s ease, transform 0.15s ease;
+}
+[class*="st-key-clic_"]:hover .eti-destaque {
+  border-color: #A9CDD2;
+  box-shadow: 0 6px 18px rgba(16, 42, 51, 0.08);
+  transform: translateY(-1px);
+}
+.eti-destaque-icone {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 2.25rem;
+  height: 2.25rem;
+  margin-bottom: 0.55rem;
+  border-radius: 10px;
+  background: #DDECEE;
+}
+.eti-destaque-icone .eti-icone {
+  font-size: 1.3rem;
+  color: var(--petroleo);
+}
+.eti-destaque-valor {
+  font-size: 2.05rem;
+  font-weight: 800;
+  letter-spacing: -0.03em;
+  line-height: 1.05;
+  color: var(--tinta);
+  font-variant-numeric: tabular-nums;
+}
+.eti-destaque-titulo {
+  font-size: 0.95rem;
+  font-weight: 600;
+  line-height: 1.3;
+  color: var(--tinta);
+}
+.eti-destaque-texto {
+  margin: 0.35rem 0 0 0;
+  font-size: 0.84rem;
+  line-height: 1.42;
+  color: var(--tinta-suave);
+}
+.eti-destaque .eti-seta {
+  position: absolute;
+  top: 1.05rem;
+  right: 1rem;
+  color: var(--petroleo);
+  opacity: 0.55;
+  transition: transform 0.15s ease, opacity 0.15s ease;
+}
+[class*="st-key-clic_"]:hover .eti-destaque .eti-seta {
+  opacity: 1;
+  transform: translateX(2px);
+}
+
+/* ---------------------------------------------------------------- histograma (graficos.histograma) */
+.viz-hist {
+  display: grid;
+  grid-template-columns: repeat(var(--colunas), minmax(0, 1fr));
+  column-gap: 4px;
+  padding-top: 2.5rem;  /* espaço dos textos das linhas tracejadas */
+}
+.viz-hist-col {
+  position: relative;
+  display: flex;
+  flex-direction: column;
+  min-width: 0;
+}
+.viz-hist-pilha {
+  display: flex;
+  flex-direction: column;
+  justify-content: flex-end;
+  height: 12rem;
+}
+.viz-hist-valor {
+  margin-bottom: 0.2rem;
+  text-align: center;
+  font-size: 0.8rem;
+  font-weight: 700;
+  color: var(--tinta);
+  font-variant-numeric: tabular-nums;
+  white-space: nowrap;
+}
+.viz-hist-barra {
+  flex: none;
+  max-height: calc(100% - 1.3rem);
+  border-radius: 4px 4px 0 0;
+}
+.viz-hist-rotulo {
+  margin-top: 0.4rem;
+  text-align: center;
+  font-size: 0.74rem;
+  color: var(--tinta-suave);
+  font-variant-numeric: tabular-nums;
+  white-space: nowrap;
+}
+.viz-hist-separada {
+  margin-left: 0.75rem;
+}
+/* Rótulo da última coluna ("Nunca"): se não couber, avança para a esquerda, nunca para fora do gráfico */
+.viz-hist-col:last-child .viz-hist-rotulo {
+  display: flex;
+  justify-content: flex-end;
+}
+.viz-hist-marca::before {
+  content: "";
+  position: absolute;
+  left: -3px;
+  top: -2.4rem;
+  bottom: 1.35rem;
+  border-left: 2px dashed #8795A1;
+}
+.viz-hist-marca-texto {
+  position: absolute;
+  left: 3px;
+  top: -2.45rem;
+  font-size: 0.74rem;
+  font-weight: 600;
+  line-height: 1.2;
+  color: var(--tinta-suave);
+  white-space: nowrap;
+}
+.viz-hist-marca ~ .viz-hist-marca .viz-hist-marca-texto {
+  top: -1.3rem;  /* duas marcas próximas: textos em alturas diferentes */
+}
+.viz-hist-eixo {
+  margin-top: 0.4rem;
+  text-align: center;
+  font-size: 0.8rem;
+  color: var(--tinta-suave);
+}
+@container viz (max-width: 30rem) {
+  .viz-hist { column-gap: 2px; }
+  .viz-hist-pilha { height: 10rem; }
+  .viz-hist-valor { font-size: 0.66rem; }
+  .viz-hist-rotulo { font-size: 0.6rem; letter-spacing: -0.02em; }
+  .viz-hist-separada { margin-left: 0.4rem; }
+}
+
+/* Barras empilhadas em blocos (grupos) e total ao lado do rótulo */
+.viz-grupo {
+  grid-column: 1 / -1;
+  margin-top: 0.7rem;
+  padding-bottom: 0.15rem;
+  border-bottom: 1px solid var(--borda);
+  font-size: 0.74rem;
+  font-weight: 700;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+  color: var(--petroleo);
+}
+.viz-grupo:first-child {
+  margin-top: 0;
+}
+.viz-n {
+  display: block;
+  font-size: 0.76rem;
+  font-weight: 600;
+  color: var(--tinta-suave);
+  font-variant-numeric: tabular-nums;
+}
+
+/* ---------------------------------------------------------------- mapas */
+/* O contêiner tem a proporção do enquadramento da região (mapas.proporcao); o gráfico ocupa a área toda */
+.st-key-mapa_territorio,
+.st-key-mapa_visao {
+  width: 100%;
+  aspect-ratio: var(--proporcao-mapa, 1.45);
+}
+:is(.st-key-mapa_territorio, .st-key-mapa_visao) > [data-testid="stElementContainer"] {
+  height: 100%;
+}
+.eti-legenda-mapa {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: flex-end;
+  gap: 0.5rem 1.5rem;
+  margin: 0.2rem 0 0.4rem 0;
+  font-size: 0.8rem;
+  color: var(--tinta-suave);
+}
+.eti-legenda-mapa-escala {
+  display: flex;
+  flex: 0 1 16rem;
+  flex-direction: column;
+  gap: 0.25rem;
+  min-width: 11rem;
+}
+.eti-legenda-mapa-escala b {
+  font-weight: 600;
+  color: var(--tinta);
+}
+.eti-legenda-mapa-escala i {
+  display: block;
+  height: 0.6rem;
+  border-radius: 999px;
+}
+.eti-legenda-mapa-escala div {
+  display: flex;
+  justify-content: space-between;
+  font-variant-numeric: tabular-nums;
+}
+.eti-legenda-mapa-vazio {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.4rem;
+}
+.eti-legenda-mapa-vazio i {
+  width: 0.9rem;
+  height: 0.7rem;
+  border: 1px solid var(--borda);
+  border-radius: 2px;
+}
+
+/* ---------------------------------------------------------------- linhas (contas, municípios) */
+.eti-linha-conta {
+  border-style: dashed;
+}
+/* Linha do ranking de municípios: nome em cima, barra de acesso e alerta embaixo, seta à direita */
+.eti-linha-municipio {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto auto;
+  grid-template-areas: "id id seta" "acesso alerta seta";
+  align-items: center;
+  gap: 0.35rem 0.6rem;
+  padding: 0.6rem 0.75rem;
+  border: 1px solid var(--borda);
+  border-radius: 12px;
+  background: #FFFFFF;
+  transition: border-color 0.15s ease, background 0.15s ease;
+}
+[class*="st-key-clic_"]:hover .eti-linha-municipio {
+  border-color: #A9CDD2;
+  background: #F8FBFB;
+}
+.eti-linha-municipio .eti-cartao-id {
+  grid-area: id;
+}
+.eti-linha-municipio .eti-linha-situacao {
+  grid-area: alerta;
+}
+.eti-linha-municipio .eti-seta {
+  grid-area: seta;
+}
+.eti-linha-municipio-acesso {
+  grid-area: acesso;
+  display: flex;
+  flex-direction: column;
+  gap: 0.25rem;
+}
+.st-key-lista_municipios {
+  gap: 0.45rem;
+}
+
+/* ---------------------------------------------------------------- checagem dos dados (Qualidade) */
+.eti-verificacao {
+  position: relative;
+  display: flex;
+  align-items: flex-start;
+  gap: 0.7rem;
+  padding: 0.8rem 0.9rem;
+  border: 1px solid var(--borda);
+  border-radius: 12px;
+  background: #FFFFFF;
+  transition: border-color 0.15s ease, box-shadow 0.15s ease;
+}
+[class*="st-key-clic_"]:hover .eti-verificacao {
+  border-color: #A9CDD2;
+  box-shadow: 0 4px 14px rgba(16, 42, 51, 0.06);
+}
+.eti-verificacao-marca {
+  display: inline-flex;
+  flex: none;
+  align-items: center;
+  justify-content: center;
+  width: 1.9rem;
+  height: 1.9rem;
+  border-radius: 50%;
+  background: var(--fundo-2);
+}
+.eti-verificacao-ok .eti-verificacao-marca {
+  background: #DDECEE;
+}
+.eti-verificacao-ok .eti-verificacao-marca .eti-icone {
+  color: var(--petroleo);
+}
+.eti-verificacao-atencao {
+  border-color: #F0D5C4;
+  background: #FFFBF8;
+}
+.eti-verificacao-atencao .eti-verificacao-marca {
+  background: #F6E3D6;
+}
+.eti-verificacao-atencao .eti-verificacao-marca .eti-icone {
+  color: #8A3A19;
+}
+.eti-verificacao-corpo {
+  min-width: 0;
+  flex: 1 1 auto;
+}
+.eti-verificacao-valor {
+  font-size: 1.3rem;
+  font-weight: 750;
+  letter-spacing: -0.02em;
+  line-height: 1.1;
+  color: var(--tinta);
+  font-variant-numeric: tabular-nums;
+}
+.eti-verificacao-titulo {
+  margin-top: 0.12rem;
+  font-size: 0.86rem;
+  font-weight: 600;
+  line-height: 1.3;
+  color: var(--tinta);
+}
+.eti-verificacao-detalhe {
+  margin-top: 0.15rem;
+  font-size: 0.78rem;
+  line-height: 1.35;
+  color: var(--tinta-suave);
+}
+.eti-verificacao .eti-seta {
+  align-self: center;
+}
+
+/* Sugestão de conciliação: cadastro e plataforma lado a lado */
+.eti-par {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto minmax(0, 1fr);
+  gap: 0.6rem 1rem;
+  align-items: center;
+}
+.eti-par-lado {
+  min-width: 0;
+  height: 100%;
+  padding: 0.7rem 0.85rem;
+  border-radius: 10px;
+  background: var(--fundo-2);
+}
+.eti-par-rotulo {
+  display: flex;
+  align-items: center;
+  gap: 0.3rem;
+  font-size: 0.72rem;
+  font-weight: 650;
+  letter-spacing: 0.05em;
+  text-transform: uppercase;
+  color: var(--tinta-suave);
+}
+.eti-par-rotulo .eti-icone {
+  font-size: 0.95rem;
+}
+.eti-par-nome {
+  margin-top: 0.25rem;
+  font-size: 1rem;
+  font-weight: 650;
+  line-height: 1.3;
+  overflow-wrap: anywhere;
+}
+.eti-par-detalhe {
+  margin-top: 0.12rem;
+  font-size: 0.82rem;
+  line-height: 1.35;
+  color: var(--tinta-suave);
+  overflow-wrap: anywhere;
+}
+.eti-par-meio {
+  text-align: center;
+}
+.eti-par-meio .eti-icone {
+  font-size: 1.4rem;
+  color: var(--petroleo);
+}
+.eti-par-semelhanca {
+  font-size: 1.1rem;
+  font-weight: 750;
+  color: var(--tinta);
+}
+.eti-par-meio small {
+  display: block;
+  max-width: 6rem;
+  font-size: 0.7rem;
+  line-height: 1.2;
+  color: var(--tinta-suave);
+}
+.eti-par-motivo {
+  grid-column: 1 / -1;
+  font-size: 0.84rem;
+  font-weight: 600;
+  color: #8A3A19;
+}
+
+/* Linha do tempo das importações */
+[data-testid="stHtml"] ol.eti-linha-do-tempo {
+  list-style: none;
+  margin: 0.5rem 0 0.8rem 0;
+  padding: 0;
+}
+.eti-importacao {
+  position: relative;
+  display: flex;
+  gap: 0.85rem;
+  margin: 0;
+  padding: 0 0 1.15rem 0;
+}
+.eti-importacao:not(:last-child)::before {
+  content: "";
+  position: absolute;
+  left: calc(1rem - 1px);
+  top: 2.2rem;
+  bottom: 0.2rem;
+  width: 2px;
+  background: var(--borda);
+}
+.eti-importacao-marca {
+  display: inline-flex;
+  flex: none;
+  align-items: center;
+  justify-content: center;
+  width: 2rem;
+  height: 2rem;
+  border-radius: 50%;
+  background: var(--fundo-2);
+}
+.eti-importacao-ativa .eti-importacao-marca {
+  background: #DDECEE;
+}
+.eti-importacao-ativa .eti-importacao-marca .eti-icone {
+  color: var(--petroleo);
+}
+.eti-importacao-titulo {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 0.45rem;
+  font-weight: 650;
+  line-height: 1.3;
+}
+.eti-importacao-detalhe {
+  margin-top: 0.15rem;
+  font-size: 0.84rem;
+  line-height: 1.4;
+  color: var(--tinta-suave);
+}
+.eti-importacao-arquivos {
+  display: flex;
+  align-items: flex-start;
+  gap: 0.3rem;
+  margin-top: 0.3rem;
+  font-size: 0.8rem;
+  line-height: 1.35;
+  color: var(--tinta-suave);
+  overflow-wrap: anywhere;
+}
+.eti-importacao-arquivos .eti-icone {
+  font-size: 0.95rem;
+}
+
+/* ---------------------------------------------------------------- Sobre os dados */
+.eti-fontes,
+.eti-indicadores {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(min(100%, 19rem), 1fr));
+  gap: 0.9rem;
+  margin: 0.4rem 0 0.9rem 0;
+}
+.eti-fontes {
+  grid-template-columns: repeat(auto-fill, minmax(min(100%, 25rem), 1fr));
+}
+.eti-fonte,
+.eti-indicador {
+  display: flex;
+  flex-direction: column;
+  gap: 0.5rem;
+  padding: 1rem 1.1rem;
+  border: 1px solid var(--borda);
+  border-radius: 14px;
+  background: #FFFFFF;
+}
+.eti-fonte-topo {
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+  font-size: 1.02rem;
+  font-weight: 700;
+}
+.eti-fonte-topo .eti-icone {
+  font-size: 1.35rem;
+  color: var(--petroleo);
+}
+.eti-fonte p,
+.eti-indicador p {
+  margin: 0;
+  font-size: 0.88rem;
+  line-height: 1.5;
+  color: var(--tinta-suave);
+}
+.eti-indicador p {
+  color: var(--tinta);
+}
+[data-testid="stHtml"] dl.eti-dl-compacta {
+  grid-template-columns: minmax(6.5rem, 8.5rem) minmax(0, 1fr);
+  margin: 0.1rem 0 0 0;
+  font-size: 0.82rem;
+}
+[data-testid="stHtml"] .eti-indicador dl.eti-dl-compacta {
+  grid-template-columns: minmax(0, 1fr);
+  gap: 0;
+  font-size: 0.8rem;
+}
+.eti-indicador .eti-dl-compacta dt {
+  margin-top: 0.3rem;
+  font-weight: 600;
+  color: var(--tinta);
+}
+.eti-indicador-topo {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 0.5rem;
+}
+.eti-indicador-nome {
+  font-size: 0.98rem;
+  font-weight: 700;
+  line-height: 1.3;
+}
+.eti-indicador-formula {
+  display: flex;
+  align-items: flex-start;
+  gap: 0.4rem;
+  padding: 0.45rem 0.6rem;
+  border-radius: 8px;
+  background: var(--fundo-2);
+  font-size: 0.8rem;
+  line-height: 1.4;
+}
+.eti-indicador-formula .eti-icone {
+  font-size: 1rem;
+  color: var(--petroleo);
+}
+[data-testid="stHtml"] :is(ul.eti-cores, ul.eti-privacidade, ol.eti-passos-atualizacao) {
+  list-style: none;
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(min(100%, 17rem), 1fr));
+  gap: 0.6rem 1.2rem;
+  margin: 0.3rem 0 0.8rem 0;
+  padding: 0;
+}
+[data-testid="stHtml"] .eti-cores li {
+  display: grid;
+  grid-template-columns: 1rem minmax(0, 1fr);
+  column-gap: 0.6rem;
+  margin: 0;
+  font-size: 0.88rem;
+  line-height: 1.35;
+}
+.eti-cores i {
+  grid-row: span 2;
+  width: 1rem;
+  height: 1rem;
+  margin-top: 0.1rem;
+  border-radius: 4px;
+}
+.eti-cores b {
+  font-weight: 650;
+}
+.eti-cores span {
+  font-size: 0.8rem;
+  color: var(--tinta-suave);
+}
+[data-testid="stHtml"] :is(.eti-privacidade, .eti-passos-atualizacao) li {
+  display: flex;
+  align-items: flex-start;
+  gap: 0.65rem;
+  margin: 0;
+  padding: 0.8rem 0.9rem;
+  border-radius: 12px;
+  background: var(--fundo-2);
+  font-size: 0.86rem;
+  line-height: 1.45;
+}
+:is(.eti-privacidade, .eti-passos-atualizacao) li .eti-icone {
+  margin-top: 0.05rem;
+  font-size: 1.25rem;
+  color: var(--petroleo);
+}
+:is(.eti-privacidade, .eti-passos-atualizacao) b {
+  display: block;
+  font-weight: 650;
+}
+:is(.eti-privacidade, .eti-passos-atualizacao) span:not(.eti-icone) {
+  color: var(--tinta-suave);
+}
+
 /* ---------------------------------------------------------------- telas estreitas */
 @media (max-width: 640px) {
   [data-testid="stMainBlockContainer"] {
     padding-left: 1rem;
     padding-right: 1rem;
+    padding-top: 3.6rem;  /* abaixo da barra do Streamlit (botão do menu), que cobria a marca */
+  }
+  .eti-par {
+    grid-template-columns: minmax(0, 1fr);
+  }
+  .eti-par-meio {
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    gap: 0.5rem;
+  }
+  .eti-par-meio small {
+    max-width: none;
+  }
+  .eti-destaque-valor {
+    font-size: 1.8rem;
   }
   .eti-marca {
     width: 160px;

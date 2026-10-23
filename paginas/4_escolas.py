@@ -4,6 +4,7 @@ import pandas as pd
 import streamlit as st
 
 from src import cartoes, fichas, graficos, mapas, metrics, painel, school_data, ui
+from src import reconciliation as rc
 from src.normalization import chave_comparacao
 
 ctx = painel.contexto()
@@ -83,6 +84,29 @@ else:
 
     ui.grade(list(vista.head(mostrados).itertuples(index=False)), desenhar, "escolas")
     ui.botao_mais(mostrados, len(vista), "escolas", unidade="escolas")
+
+# ---------------------------------------------------------------- participação por contexto da escola
+if base.tem_atividade and base.tem_escolas:
+    ui.secao("Participação por contexto da escola",
+             "Pessoas com conta na plataforma pelo tempo desde o último acesso, segundo características da escola "
+             "no Censo Escolar. O número ao lado de cada categoria é o total de pessoas.")
+    pessoas = painel.pessoas_de(ctx.cursistas)
+    com_conta = pessoas[pessoas["status_conciliacao"] == rc.CORRESPONDENTE]
+    ordem = [f for f in painel.ordem_faixas(base.parametros["faixas_inatividade_dias"]) if f != painel.FAIXA_SEM_CONTA]
+    esquerda, direita = ui.colunas(2, "contexto_escola")
+    with esquerda:
+        ui.comparacao_faixas(com_conta, [d for d in painel.DIMENSOES_ESCOLA if d[1] in ("localizacao", "localizacao_diferenciada")],
+                             ordem, cores, "Localização da escola", "Localização e área de localização diferenciada (Censo)",
+                             "esc_contexto_local", fonte=f"{fonte_escolas} {ui.fonte_atividade(base, ctx.cfg.fuso_horario)}",
+                             sem_valor="Escola sem dados do Inep")
+    with direita:
+        ui.comparacao_faixas(com_conta, [d for d in painel.DIMENSOES_ESCOLA if d[1] in ("internet_escola", "banda_larga_escola")],
+                             ordem, cores, "Conectividade da escola", "Acesso à internet e banda larga declarados ao Censo",
+                             "esc_contexto_internet",
+                             "Comparação descritiva: o curso pode ser acessado de fora da escola, e diferenças entre "
+                             "grupos pequenos podem ser casuais. Sem internet, a escola também conta como sem banda larga.",
+                             f"{fonte_escolas} {ui.fonte_atividade(base, ctx.cfg.fuso_horario)}",
+                             sem_valor="Escola sem dados do Inep")
 
 # ---------------------------------------------------------------- panorama no Censo
 ui.secao("Panorama das escolas no Censo Escolar",

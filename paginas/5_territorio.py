@@ -30,23 +30,26 @@ municipios_geo, contornos_geo, faltando = mapas.malhas_das_ufs(ufs)
 sem_municipio = int(painel.municipio_do_registro(pessoas).isna().sum())
 
 r = metrics.calcular(cursistas, ctx.contas, base, base.parametros)
-col = st.columns(4)
-col[0].metric("Municípios com cursistas", metrics.numero(len(resumo)),
-              help="Municípios onde ficam as escolas dos cursistas (segundo o Inep) ou, sem escola localizada, "
-                   "o município do ente.")
-col[0].html(f'<p class="eti-metrica-contexto">em {len(ufs)} UF(s)</p>')
-col[1].metric(r["entes_representados"].indicador.nome, metrics.valor_formatado(r["entes_representados"]),
-              help=metrics.ajuda(r["entes_representados"].indicador))
-col[1].html(f'<p class="eti-metrica-contexto">{metrics.contexto_formatado(r["entes_representados"])}</p>')
 com_acesso = resumo.dropna(subset=["taxa_acesso"]) if not resumo.empty else resumo
 melhor = (com_acesso["taxa_acesso"] >= 0.9).sum() if not com_acesso.empty else 0
-col[2].metric("Municípios com 90% ou mais de acesso", metrics.numero(melhor),
-              help="Municípios em que ao menos 90% das pessoas com conta já acessaram o curso.")
-col[2].html(f'<p class="eti-metrica-contexto">de {metrics.numero(len(com_acesso))} com cursistas com conta</p>')
-col[3].metric("Pessoas sem município identificado", metrics.numero(sem_municipio),
-              help="Sem escola localizada na base do Inep e sem código IBGE municipal no cadastro (ex.: entes estaduais "
-                   "com escola não localizada). Não aparecem no mapa.")
-col[3].html(f'<p class="eti-metrica-contexto">de {metrics.numero(len(pessoas))} pessoas</p>')
+numeros_territorio = [
+    ("Municípios com cursistas", metrics.numero(len(resumo)), f"em {len(ufs)} UF(s)",
+     "Municípios onde ficam as escolas dos cursistas (segundo o Inep) ou, sem escola localizada, o município do ente."),
+    (r["entes_representados"].indicador.nome, metrics.valor_formatado(r["entes_representados"]),
+     metrics.contexto_formatado(r["entes_representados"]), metrics.ajuda(r["entes_representados"].indicador)),
+    ("Municípios com 90% ou mais de acesso", metrics.numero(melhor),
+     f"de {metrics.numero(len(com_acesso))} com cursistas com conta",
+     "Municípios em que ao menos 90% das pessoas com conta já acessaram o curso."),
+    ("Pessoas sem município identificado", metrics.numero(sem_municipio), f"de {metrics.numero(len(pessoas))} pessoas",
+     "Sem escola localizada na base do Inep e sem código IBGE municipal no cadastro (ex.: entes estaduais com escola "
+     "não localizada). Não aparecem no mapa."),
+]
+with st.container(key="kpis_territorio"):
+    colunas_kpi = st.columns(4)
+for i, (coluna_kpi, (rotulo_kpi, valor, contexto, ajuda)) in enumerate(zip(colunas_kpi, numeros_territorio)):
+    with coluna_kpi, st.container(border=True, key=f"kpi_territorio_{i}"):
+        st.metric(rotulo_kpi, valor, help=ajuda)
+        st.html(f'<p class="eti-metrica-contexto">{html.escape(contexto)}</p>')
 
 # ---------------------------------------------------------------- mapa
 ui.secao("Mapa dos municípios")
@@ -63,9 +66,15 @@ with esquerda:
     _, _, descricao = mapas.METRICAS[metrica]
     ui.cabecalho_grafico(f"{metrica}, por município", f"{descricao}. Municípios em cinza não têm cursistas.",
                          ui.chamada(base))
-    fig = mapas.figura(resumo, municipios_geo, contornos_geo, metrica, st.session_state.get("municipio_sel"), altura=520)
-    evento = st.plotly_chart(fig, theme=None, config=graficos.CONFIG, width="stretch", key="mapa_municipios",
-                             on_select="rerun", selection_mode="points")
+    fig = mapas.figura(resumo, municipios_geo, contornos_geo, metrica, st.session_state.get("municipio_sel"),
+                       altura=None, escala=False)
+    # O contêiner tem a proporção do enquadramento: o mapa ocupa a área toda em qualquer largura de tela
+    st.html(f"<style>.st-key-mapa_territorio {{ --proporcao-mapa: {mapas.proporcao(municipios_geo, contornos_geo):.3f}; }}"
+            "</style>")
+    with st.container(key="mapa_territorio"):
+        evento = st.plotly_chart(fig, theme=None, config=graficos.CONFIG, width="stretch", height="stretch",
+                                 key="mapa_municipios", on_select="rerun", selection_mode="points")
+    st.html(mapas.legenda_html(resumo, metrica))
     clicados = tuple(p.get("location") for p in (evento.selection.points if evento else []) if p.get("location") in rotulo_municipio)
     if clicados and clicados != st.session_state.get("_mapa_clique_processado"):
         st.session_state["_mapa_clique_processado"] = clicados
@@ -77,6 +86,13 @@ with esquerda:
             f"o Inep ou, sem escola localizada, o do ente. {ui.fonte_atividade(base, ctx.cfg.fuso_horario) if base.tem_atividade else ''}")
 
 atual = st.session_state.get("municipio_sel")
+
+
+def _selecionar_municipio(codigo: str | None) -> None:
+    st.session_state["municipio_sel"] = codigo
+    st.session_state["mapa_municipio_escolha"] = codigo
+
+
 with direita:
     def _ao_escolher_municipio() -> None:
         st.session_state["municipio_sel"] = st.session_state.get("mapa_municipio_escolha")
@@ -89,16 +105,29 @@ with direita:
         dados = resumo[resumo["codigo"] == atual].iloc[0]
         st.html(f'<div class="eti-ficha-cabecalho eti-ficha-compacta"><div class="eti-ficha-titulo">'
                 f'{html.escape(rotulo_municipio[atual])}</div></div>')
-        a, b = st.columns(2)
-        a.metric("Cursistas", metrics.numero(dados["pessoas"]))
-        b.metric("Escolas", metrics.numero(dados["escolas"]))
-        if base.tem_atividade and dados["com_conta"]:
-            a.metric("Acessaram o curso", metrics.percentual(dados["taxa_acesso"], 0),
-                     help="Entre as pessoas com conta na plataforma.")
-            b.metric("Nunca acessaram", metrics.numero(dados["nunca"]))
+        st.html(cartoes.numeros(
+            [("Cursistas", metrics.numero(dados["pessoas"]), None), ("Escolas", metrics.numero(dados["escolas"]), None)]
+            + ([("Acessaram o curso", metrics.percentual(dados["taxa_acesso"], 0),
+                 f"{metrics.numero(dados['acessaram'])} de {metrics.numero(dados['com_conta'])} com conta"),
+                ("Nunca acessaram", metrics.numero(dados["nunca"]), None)]
+               if base.tem_atividade and dados["com_conta"] else [])
+        ))
         ui.nota("As escolas do município estão logo abaixo do mapa.")
+        st.button("Ver a lista de municípios", icon=":material/format_list_bulleted:", type="tertiary",
+                  on_click=_selecionar_municipio, args=(None,), key="mapa_limpar")
     else:
-        ui.vazio("Clique em um município colorido no mapa ou escolha-o na lista para ver as suas escolas.")
+        # Sem município escolhido: a lista dos que pedem atenção (o clique escolhe o município no mapa)
+        st.html('<div class="viz-titulo">Municípios que pedem atenção</div>'
+                '<p class="viz-sub">Mais pessoas com conta que nunca acessaram primeiro. Clique para ver no mapa.</p>')
+        ranking = resumo.assign(nome=resumo["codigo"].map(lambda c: rotulo_municipio.get(c, c)))
+        ranking = ranking.sort_values(["nunca", "taxa_acesso", "pessoas"], ascending=[False, True, False],
+                                      na_position="last", kind="stable")
+        mostrados = ui.mais_itens(len(ranking), "municipios", passo=8)
+        with st.container(key="lista_municipios"):
+            for i, linha in enumerate(ranking.head(mostrados).itertuples(index=False)):
+                ui.clicavel(cartoes.linha_municipio(linha.nome, linha), f"municipio_{i}", f"Ver {linha.nome} no mapa",
+                            _selecionar_municipio, (linha.codigo,))
+        ui.botao_mais(mostrados, len(ranking), "municipios", passo=8, unidade="municípios", centralizado=False)
 
 # ---------------------------------------------------------------- escolas do município selecionado
 if atual in rotulo_municipio:
@@ -140,18 +169,6 @@ with direita:
         rotulos=[metrics.numero(v) for v in topo],
     )
     ui.grafico(fig, None, "territorio_entes", fonte=ui.fonte_cadastro(base, ctx.cfg.fuso_horario))
-
-limite = base.parametros["janela_acesso_recente_dias"]
-resumo_ente = pessoas.groupby(["uf", "ente"], dropna=False).agg(
-    pessoas=("chave_pessoa", "nunique"),
-    escolas=("inep", lambda s: s.dropna().nunique()),
-    com_conta=("status_conciliacao", lambda s: int((s == rc.CORRESPONDENTE).sum())),
-    acesso_recente=("dias_sem_acesso", lambda s: int((s.fillna(10**9) <= limite).sum())),
-).reset_index().sort_values(["uf", "pessoas"], ascending=[True, False])
-with st.expander(f"Todos os entes ({metrics.numero(len(resumo_ente))})"):
-    ui.tabela(resumo_ente, {"uf": "UF", "ente": "Ente", "pessoas": "Pessoas", "escolas": "Escolas (INEP válido)",
-                            "com_conta": "Com conta encontrada", "acesso_recente": f"Acesso nos últimos {limite} dias"},
-              altura=420)
 
 # ---------------------------------------------------------------- turmas x UF do cadastro
 if base.tem_atividade:

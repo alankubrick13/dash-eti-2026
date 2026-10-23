@@ -15,7 +15,7 @@ APP = str(Path(__file__).resolve().parent.parent / "app.py")
 
 PAGINAS = [
     "paginas/1_visao_geral.py", "paginas/2_cursistas.py", "paginas/3_atividade.py", "paginas/4_escolas.py",
-    "paginas/5_territorio.py", "paginas/6_qualidade_conciliacao.py", "paginas/7_administracao.py",
+    "paginas/5_territorio.py", "paginas/6_qualidade_conciliacao.py", "paginas/8_sobre.py", "paginas/7_administracao.py",
 ]
 TERMOS_DE_DADOS_INVENTADOS = ("fictíci", "demonstração", "sintétic", "de exemplo")
 
@@ -221,3 +221,94 @@ def test_codigo_atualizado_no_servidor_e_recarregado(tmp_path):
     """)
     saida = subprocess.run([sys.executable, "-c", script], capture_output=True, text=True, timeout=600, cwd=tmp_path)
     confere(saida.returncode == 0 and saida.stdout.strip().endswith("ok"), "o painel não recarregou o código atualizado")
+
+
+def _corpos(teste) -> list[str]:
+    return [h.proto.body for h in teste.get("html")]
+
+
+def test_visao_geral_abre_com_destaques_e_tempo_sem_acesso(app):
+    corpos = _corpos(app)
+    assert sum(c.startswith('<div class="eti-destaque"') for c in corpos) == 4
+    assert any('class="viz-hist"' in c for c in corpos)  # histograma do último acesso
+
+
+def test_destaque_leva_a_galeria_ja_filtrada(app):
+    from src import painel
+    from src.cartoes import nome_legivel
+
+    [destaque] = [b for b in app.button if b.label.endswith("nunca acessaram: ver detalhes")]
+    destaque.click().run()
+    confere(not _erros(app), "erro ao seguir o destaque")
+    assert app.session_state["cursistas_escolha"] == painel.GRUPO_NUNCA
+    pessoas = app.session_state["_contexto"].cursistas
+    nomes = {b.label.removeprefix("Abrir a ficha de ") for b in app.button if b.label.startswith("Abrir a ficha de ")}
+    esperados = {nome_legivel(n) for n in pessoas.loc[pessoas["acesso_tipo"] == "nunca", "nome"]}
+    confere(bool(nomes) and nomes <= esperados, "a galeria não abriu no grupo do destaque")
+
+
+def test_turma_abre_a_ficha_com_quem_precisa_de_atencao_e_volta(app):
+    from src import fichas, painel
+
+    app.switch_page("paginas/3_atividade.py").run()
+    confere(not _erros(app), "erro ao montar a página de atividade")
+    ctx = app.session_state["_contexto"]
+    parametros = ctx.base.parametros
+    turmas = painel.resumo_turmas(ctx.contas, parametros["janela_acesso_recente_dias"],
+                                  parametros["limite_acompanhamento_dias"])
+    assert sum(c.startswith('<div class="eti-cartao eti-cartao-turma"') for c in _corpos(app)) == len(turmas)
+    colunas = [set(df.value.columns) for df in app.dataframe]
+    confere(not any({"Nome", "Nome na plataforma"} & c for c in colunas), "tabela de pessoas na página de atividade")
+
+    [turma] = [b for b in app.button if b.label.startswith("Abrir a ficha da turma")][:1]
+    turma.click().run()
+    assert not _erros(app)
+    tipo, grupo, _ = app.session_state[fichas.ABERTA]
+    assert tipo == "turma" and "Precisam de atenção" in _textos(app)
+    [pessoa] = [b for b in app.button if b.label.startswith("Abrir a ficha de ")][:1]
+    pessoa.click().run()
+    assert not _erros(app)
+    assert app.session_state[fichas.ABERTA][0] == "cursista" and app.session_state[fichas.ABERTA][2] == ("turma", grupo)
+    [voltar] = [b for b in app.button if b.label.startswith("Voltar para a turma")]
+    voltar.click().run()
+    assert app.session_state[fichas.ABERTA][:2] == ("turma", grupo)
+
+
+def test_conciliacao_em_cartoes_registra_a_decisao(app):
+    """Na cópia temporária do banco: associar uma sugestão grava a decisão e tira o cartão da lista."""
+    app.switch_page("paginas/6_qualidade_conciliacao.py").run()
+    confere(not _erros(app), "erro ao montar a página de qualidade")
+    assert any(c.startswith('<div class="eti-verificacao') for c in _corpos(app))  # checagem dos dados
+    ctx = app.session_state["_contexto"]
+    sugestoes = len(ctx.base.candidatos)
+    associar = [b for b in app.button if b.label == "Associar"]
+    assert len(associar) == sugestoes
+    if not sugestoes:
+        pytest.skip("nenhuma sugestão de conciliação pendente")
+    antes = len(ctx.repo.decisoes())
+    associar[0].click().run()
+    assert not _erros(app)
+    assert len(ctx.repo.decisoes()) == antes + 1
+    assert len([b for b in app.button if b.label == "Associar"]) == sugestoes - 1
+
+
+def test_lista_de_municipios_escolhe_o_municipio(app):
+    app.switch_page("paginas/5_territorio.py").run()
+    [linha] = [b for b in app.button if b.label.startswith("Ver ") and b.label.endswith(" no mapa")][:1]
+    linha.click().run()
+    assert not _erros(app)
+    assert app.session_state["municipio_sel"] and "## Escolas de " in _textos(app)
+
+
+def test_sobre_os_dados_traz_fontes_e_todos_os_indicadores(app):
+    import html
+
+    from src import metrics
+
+    app.switch_page("paginas/8_sobre.py").run()
+    assert not _erros(app)
+    corpo = " ".join(_corpos(app))
+    for indicador in [*metrics.INDICADORES.values(), *metrics.INDICADORES_CONTAS.values(),
+                      *metrics.INDICADORES_ESCOLAS.values()]:
+        assert html.escape(indicador.nome) in corpo, indicador.id
+    assert "Cadastro dos cursistas" in corpo and "Base escolar oficial" in corpo

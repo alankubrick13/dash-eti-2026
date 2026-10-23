@@ -278,11 +278,17 @@ def preparar_cadastro(
 # ---------------------------------------------------------------- atividade
 
 
-def descrever_referencia(referencia_em: datetime | None, fuso: str) -> str:
+def descrever_referencia(referencia_em: datetime | None, fuso: str, origem: str | None = None) -> str:
+    """Texto da data de referência; ``origem`` diz de onde ela veio ("nome do arquivo", "data do arquivo")."""
     if referencia_em is None:
         return ("Momento da exportação não informado: tempos relativos contados a partir da "
                 "exportação, sem data absoluta.")
     local = referencia_em.astimezone(ZoneInfo(fuso))
+    if origem == "nome do arquivo":
+        return f"Lista de participantes de {local:%d/%m/%Y %H:%M} ({fuso}), conforme o nome do arquivo."
+    if origem == "data do arquivo":
+        return (f"Lista de participantes salva em {local:%d/%m/%Y %H:%M} ({fuso}), conforme a data do arquivo "
+                "(momento em que foi gravado na pasta).")
     return f"Exportação de {local:%d/%m/%Y %H:%M} ({fuso}), informada na importação."
 
 
@@ -294,6 +300,7 @@ def preparar_atividade(
     papeis_cursista: list[str],
     manual: dict[str, dict[str, str]] | None = None,
     agora: datetime | None = None,
+    origem_referencia: str | None = None,
 ) -> Previa:
     agora = agora or datetime.now(timezone.utc)
     if referencia_em is not None and referencia_em.tzinfo is None:
@@ -426,7 +433,7 @@ def preparar_atividade(
         "atividade", reg, tabela, bloqueios, avisos, resumo,
         [t.metadados() for t in tabelas], _mapeamentos_texto(mapas),
         referencia_em=referencia_em.astimezone(timezone.utc).isoformat() if referencia_em else None,
-        referencia_descricao=descrever_referencia(referencia_em, fuso),
+        referencia_descricao=descrever_referencia(referencia_em, fuso, origem_referencia),
         importado_em=agora.isoformat(timespec="seconds"),
     )
 

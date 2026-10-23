@@ -1,7 +1,7 @@
 """Visualizações do painel, no estilo editorial adotado pela coordenação.
 
-Barras e mapas de calor são HTML/CSS próprios (tipografia nítida, números dentro das barras,
-blocos arredondados); só o mapa dos municípios (``mapas.py``) usa Plotly. A paleta é um único matiz (verde-petróleo)
+Barras, histograma e mapas de calor são HTML/CSS próprios (tipografia nítida, números dentro das
+barras, blocos arredondados); só o mapa dos municípios (``mapas.py``) usa Plotly. A paleta é um único matiz (verde-petróleo)
 do acesso mais recente ao mais antigo, com cinzas para ausência de acesso ou de informação. Todo
 gráfico traz os valores escritos e uma tabela equivalente em "Ver dados do gráfico".
 """
@@ -100,12 +100,22 @@ def barras_empilhadas_100(
     titulo: str,
     subtitulo: str | None = None,
     totais: list[int] | None = None,
+    grupos: list[str] | None = None,
+    mostrar_total: bool = False,
 ) -> Visual:
-    """Uma barra por linha, dividida pelas séries; cada segmento mostra a contagem."""
+    """Uma barra por linha, dividida pelas séries; cada segmento mostra a contagem.
+
+    ``grupos`` (um por linha) separa as linhas em blocos com subtítulo (ex.: Cargo, Origem da vaga);
+    ``mostrar_total`` escreve o total de cada linha ao lado do rótulo.
+    """
     if totais is None:
         totais = [sum(v) for v in zip(*series.values())] if series else []
     partes = []
+    grupo_atual = None
     for i, linha in enumerate(linhas):
+        if grupos and grupos[i] != grupo_atual:
+            grupo_atual = grupos[i]
+            partes.append(f'<div class="viz-grupo">{_e(grupo_atual)}</div>')
         total = totais[i] if i < len(totais) else 0
         segmentos = []
         for nome, contagens in series.items():
@@ -121,12 +131,42 @@ def barras_empilhadas_100(
                 f'<div class="viz-seg {_classe_largura(texto)}" style="flex:{valor} 1 0;background:{cor};'
                 f'color:{cor_texto_sobre(cor)}" title="{_e(dica)}"><span>{texto}</span></div>'
             )
+        total_html = f' <span class="viz-n">{_numero(total)}</span>' if mostrar_total else ""
         partes.append(
-            f'<div class="viz-rotulo">{_e(linha)}</div>'
+            f'<div class="viz-rotulo">{_e(linha)}{total_html}</div>'
             f'<div class="viz-barra" role="img" aria-label="{_e(linha)}: total {_numero(total)}">{"".join(segmentos)}</div>'
         )
     legenda = [(nome, cores.get(nome, CINZA_NAO_INTERPRETADO)) for nome, v in series.items() if any(v)]
     return Visual(f'<div class="viz-empilhado">{"".join(partes)}</div>', titulo, subtitulo, legenda)
+
+
+# ---------------------------------------------------------------- histograma (colunas verticais)
+
+
+def histograma(colunas: list[dict], titulo: str, subtitulo: str | None = None, eixo: str | None = None,
+               legenda: list[tuple[str, str]] | None = None) -> Visual:
+    """Colunas verticais com o valor escrito em cima.
+
+    Cada coluna: ``rotulo``, ``valor``, ``cor``, ``dica``; opcionais ``marca`` (texto de uma linha vertical
+    tracejada na borda esquerda da coluna, ex.: limite de acompanhamento) e ``separada`` (espaço antes,
+    para uma coluna que não faz parte da escala, como "Nunca").
+    """
+    maximo = max([c["valor"] for c in colunas] or [1]) or 1
+    partes = []
+    for c in colunas:
+        classes = "viz-hist-col" + (" viz-hist-separada" if c.get("separada") else "") + (
+            " viz-hist-marca" if c.get("marca") else "")
+        marca = f'<span class="viz-hist-marca-texto">{_e(c["marca"])}</span>' if c.get("marca") else ""
+        altura = c["valor"] / maximo * 88 if c["valor"] else 0  # 88%: o valor escrito cabe acima da maior coluna
+        partes.append(
+            f'<div class="{classes}" title="{_e(c["dica"])}">{marca}<div class="viz-hist-pilha">'
+            f'<span class="viz-hist-valor">{_numero(c["valor"])}</span>'
+            f'<div class="viz-hist-barra" style="height:{max(altura, 1.5 if c["valor"] else 0):.1f}%;'
+            f'background:{c["cor"]}"></div></div><div class="viz-hist-rotulo">{_e(c["rotulo"])}</div></div>'
+        )
+    corpo = (f'<div class="viz-hist" role="img" aria-label="{_e(titulo)}" style="--colunas:{len(colunas)}">'
+             f'{"".join(partes)}</div>' + (f'<div class="viz-hist-eixo">{_e(eixo)}</div>' if eixo else ""))
+    return Visual(corpo, titulo, subtitulo, legenda or [])
 
 
 # ---------------------------------------------------------------- barras simples

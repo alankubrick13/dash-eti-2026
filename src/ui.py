@@ -4,13 +4,16 @@ from __future__ import annotations
 
 import base64
 import html
-from datetime import datetime
+import math
+from datetime import datetime, timedelta
 from zoneinfo import ZoneInfo
 
 import pandas as pd
 import streamlit as st
 
-from . import config, graficos, metrics
+from . import config, graficos, metrics, painel
+
+IR_PARA = "_ir_para"  # página pedida por um clique (o app troca de página antes de desenhar a atual)
 
 
 def aplicar_estilo() -> None:
@@ -18,7 +21,7 @@ def aplicar_estilo() -> None:
         st.html(f"<style>{config.ARQ_CSS.read_text(encoding='utf-8')}</style>")
 
 
-def _data_local(iso: str | None, fuso: str, com_hora: bool = True) -> str | None:
+def data_local(iso: str | None, fuso: str, com_hora: bool = True) -> str | None:
     if not iso:
         return None
     try:
@@ -30,16 +33,34 @@ def _data_local(iso: str | None, fuso: str, com_hora: bool = True) -> str | None
     return momento.strftime("%d/%m/%Y %H:%M" if com_hora else "%d/%m/%Y")
 
 
+def periodo_respostas(base) -> str | None:
+    """Período das respostas às inscrições no cadastro (ex.: "08/07 a 13/08/2026"), pela própria data de resposta."""
+    if not base.tem_cadastro or "data_resposta" not in base.cursistas:
+        return None
+    datas = pd.to_datetime(base.cursistas["data_resposta"], errors="coerce", format="%Y-%m-%d").dropna()
+    if datas.empty:
+        return None
+    inicio, fim = datas.min(), datas.max()
+    if inicio == fim:
+        return f"{fim:%d/%m/%Y}"
+    return f"{inicio:%d/%m} a {fim:%d/%m/%Y}" if inicio.year == fim.year else f"{inicio:%d/%m/%Y} a {fim:%d/%m/%Y}"
+
+
 def referencias_dados(base, fuso: str) -> list[tuple[str, str]]:
     """Identificação do período/versão de cada fonte, para o cabeçalho e as notas."""
     itens = []
     cad, atv, esc = base.meta.get("cadastro"), base.meta.get("atividade"), base.meta.get("escolas")
-    itens.append(("Cadastro", f"importado em {_data_local(cad['importado_em'], fuso, False)}" if cad else "não importado"))
+    periodo = periodo_respostas(base)
+    if cad:
+        itens.append(("Cadastro", f"respostas de {periodo}" if periodo else
+                      f"importado em {data_local(cad['importado_em'], fuso, False)}"))
+    else:
+        itens.append(("Cadastro", "não importado"))
     if atv:
         if atv.get("referencia_em"):
-            texto = f"exportação de {_data_local(atv['referencia_em'], fuso)}"
+            texto = f"posição de {data_local(atv['referencia_em'], fuso)}"
         else:
-            texto = f"importada em {_data_local(atv['importado_em'], fuso, False)} (data de exportação não informada)"
+            texto = f"importada em {data_local(atv['importado_em'], fuso, False)} (data de exportação não informada)"
     else:
         texto = "não encontrada na pasta"
     itens.append(("Atividade", texto))
@@ -81,20 +102,29 @@ def chamada(base) -> str:
 def fonte_atividade(base, fuso: str) -> str:
     atv = base.meta.get("atividade") or {}
     if atv.get("referencia_em"):
-        quando = f"posição de {_data_local(atv['referencia_em'], fuso)}"
+        quando = f"posição de {data_local(atv['referencia_em'], fuso)}"
     else:
-        quando = f"importado em {_data_local(atv.get('importado_em'), fuso, False)}, data da exportação não informada"
+        quando = f"importado em {data_local(atv.get('importado_em'), fuso, False)}, data da exportação não informada"
     return f"Fonte: relatório de participantes da plataforma do curso, {quando}."
 
 
 def fonte_cadastro(base, fuso: str) -> str:
     cad = base.meta.get("cadastro") or {}
-    return f"Fonte: cadastro dos cursistas, importado em {_data_local(cad.get('importado_em'), fuso, False)}."
+    periodo = periodo_respostas(base)
+    return (f"Fonte: cadastro dos cursistas{f' (respostas de {periodo})' if periodo else ''}, "
+            f"lido em {data_local(cad.get('importado_em'), fuso, False)}.")
 
 
 def fonte_escolas(base) -> str:
     esc = base.meta.get("escolas") or {}
     return f"Fonte: {esc.get('referencia_descricao')}." if esc else "Base escolar oficial não carregada."
+
+
+def publicado_em(cfg) -> str | None:
+    """Data e hora em que a versão publicada (painel online) foi gerada."""
+    from .publicacao import data_publicacao
+
+    return data_local(data_publicacao(cfg.pasta_publicada), cfg.fuso_horario)
 
 
 def cabecalho(cfg, base) -> None:
@@ -108,9 +138,7 @@ def cabecalho(cfg, base) -> None:
     programa = "" if marca else f'<div class="eti-programa">{html.escape(config.NOME_PROGRAMA)}</div>'
     territorio = recorte_territorial(base)
     if cfg.ambiente == "publicacao":
-        from .publicacao import data_publicacao
-
-        publicado = _data_local(data_publicacao(cfg.pasta_publicada), cfg.fuso_horario)
+        publicado = publicado_em(cfg)
         selo = f"Dados reais · versão publicada em {publicado}" if publicado else "Dados reais · versão publicada"
     else:
         selo = "Dados reais · uso local neste computador" if cfg.ambiente == "local" else "Dados reais · acesso autenticado"
@@ -157,14 +185,54 @@ def _rotulos_filtros():
     return FILTROS
 
 
-def indicadores(resultados: list[metrics.Resultado], colunas: int = 4) -> None:
-    """Uma linha de indicadores; cada um com definição (ícone de ajuda) e numerador/denominador."""
-    cols = st.columns(colunas)
-    for coluna, resultado in zip(cols, resultados):
-        with coluna:
+def indicadores(resultados: list[metrics.Resultado], colunas: int = 4, chave: str | None = None) -> None:
+    """Uma linha de indicadores em cartões; cada um com definição (ícone de ajuda) e numerador/denominador.
+
+    Os percentuais trazem uma barra fina com a proporção. Em telas estreitas os cartões se reorganizam
+    (CSS ``st-key-kpis_*``).
+    """
+    chave = chave or resultados[0].indicador.id
+    with st.container(key=f"kpis_{chave}"):
+        cols = st.columns(colunas)
+    for i, (coluna, resultado) in enumerate(zip(cols, resultados)):
+        with coluna, st.container(border=True, key=f"kpi_{chave}_{i}"):
             st.metric(resultado.indicador.nome, metrics.valor_formatado(resultado),
                       help=metrics.ajuda(resultado.indicador))
-            st.html(f'<p class="eti-metrica-contexto">{html.escape(metrics.contexto_formatado(resultado))}</p>')
+            barra = ""
+            if resultado.indicador.percentual and resultado.disponivel and resultado.valor is not None:
+                fracao = min(max(float(resultado.valor), 0.0), 1.0)
+                barra = (f'<div class="eti-kpi-barra" aria-hidden="true"><div style="width:{fracao * 100:.1f}%">'
+                         "</div></div>")
+            st.html(f'{barra}<p class="eti-metrica-contexto">{html.escape(metrics.contexto_formatado(resultado))}</p>')
+
+
+def _seguir(acao: tuple) -> None:
+    """Clique num destaque: abre a ficha da turma ou leva à página (com o grupo da galeria já escolhido)."""
+    from . import fichas
+
+    if acao[0] == "turma":
+        fichas.pedir("turma", acao[1])
+        return
+    _, pagina, grupo = acao
+    if grupo:
+        st.session_state["cursistas_escolha"] = grupo
+        st.session_state["cursistas_limite"] = None
+    st.session_state[IR_PARA] = pagina
+
+
+def destaques(itens: list) -> None:
+    """Faixa de destaques (``metrics.destaques``): cartões que levam ao detalhe de cada número."""
+    from .cartoes import destaque
+
+    if not itens:
+        return
+    with st.container(key="destaques"):
+        for i, item in enumerate(itens):
+            conteudo = destaque(item.icone, item.valor, item.titulo, item.texto, com_seta=bool(item.acao))
+            if item.acao:
+                clicavel(conteudo, f"destaque_{i}", f"{item.valor} {item.titulo}: ver detalhes", _seguir, (item.acao,))
+            else:
+                st.html(conteudo)
 
 
 def colunas(espec, chave: str, gap: str = "large", **kwargs):
@@ -221,7 +289,9 @@ def mais_itens(total: int, chave: str, passo: int = 24) -> int:
     return min(limite, total)
 
 
-def botao_mais(mostrados: int, total: int, chave: str, passo: int = 24, unidade: str = "itens") -> None:
+def botao_mais(mostrados: int, total: int, chave: str, passo: int = 24, unidade: str = "itens",
+               centralizado: bool = True) -> None:
+    """Botão "Mostrar mais"; ``centralizado=False`` ocupa a largura toda (listas em colunas estreitas)."""
     estado = f"{chave}_limite"
     if mostrados >= total:
         return
@@ -229,9 +299,9 @@ def botao_mais(mostrados: int, total: int, chave: str, passo: int = 24, unidade:
     def mais() -> None:
         st.session_state[estado] = (st.session_state.get(estado) or passo) + passo
 
-    _, centro, _ = st.columns([1, 1.2, 1])
-    centro.button(f"Mostrar mais {unidade} ({metrics.numero(total - mostrados)} restantes)", on_click=mais,
-                  key=f"{chave}_mais", width="stretch", icon=":material/expand_more:")
+    lugar = st.columns([1, 1.2, 1])[1] if centralizado else st
+    lugar.button(f"Mostrar mais {unidade} ({metrics.numero(total - mostrados)} restantes)", on_click=mais,
+                 key=f"{chave}_mais", width="stretch", icon=":material/expand_more:")
 
 
 def _cabecalho_html(titulo: str, subtitulo: str | None, chamada_texto: str | None) -> str:
@@ -239,6 +309,77 @@ def _cabecalho_html(titulo: str, subtitulo: str | None, chamada_texto: str | Non
     return ((f'<div class="viz-chamada">{e(chamada_texto)}</div>' if chamada_texto else "")
             + f'<div class="viz-titulo">{e(titulo)}</div>'
             + (f'<p class="viz-sub">{e(subtitulo)}</p>' if subtitulo else ""))
+
+
+def histograma_acesso(dias: pd.Series, nunca: int, base, fuso: str, unidade: str = "pessoas",
+                      titulo: str = "Há quanto tempo foi o último acesso", subtitulo: str | None = None) -> graficos.Visual:
+    """Tempo sem acesso em classes de dias, na cor da faixa de cada classe, com a coluna "Nunca".
+
+    Linhas tracejadas marcam a janela de acesso recente e o limite de acompanhamento; quando a lista da
+    plataforma tem data de referência, cada marca traz também a data correspondente.
+    """
+    parametros = base.parametros
+    limites = parametros["faixas_inatividade_dias"]
+    janela, limite = parametros["janela_acesso_recente_dias"], parametros["limite_acompanhamento_dias"]
+    cores = graficos.cores_faixas(painel.ordem_faixas(limites))
+    classes = painel.classes_de_dias(dias, limites, (janela, limite))
+    referencia = (base.meta.get("atividade") or {}).get("referencia_em")
+    momento = datetime.fromisoformat(referencia).astimezone(ZoneInfo(fuso)) if referencia else None
+
+    def marca(dias_marca: int) -> str:
+        return f"{dias_marca} dias" + (f" · {momento - timedelta(days=dias_marca):%d/%m}" if momento else "")
+
+    colunas = []
+    for c in classes.itertuples(index=False):
+        rotulo = f"{c.inicio:g}+" if c.fim == math.inf else f"{c.inicio:g}–{c.fim:g}"
+        intervalo = f"mais de {c.inicio:g} dias" if c.fim == math.inf else f"de {c.inicio:g} a {c.fim:g} dias"
+        colunas.append({
+            "rotulo": rotulo, "valor": c.contagem, "cor": cores[c.faixa],
+            "dica": f"Último acesso {intervalo} antes da lista: {metrics.numero(c.contagem)} {unidade} ({c.faixa})",
+            "marca": marca(c.inicio) if c.inicio in (janela, limite) else None,
+        })
+    colunas.append({"rotulo": "Nunca", "valor": nunca, "cor": cores[painel.FAIXA_NUNCA], "separada": True,
+                    "dica": f"Nunca acessaram o curso: {metrics.numero(nunca)} {unidade}"})
+    por_faixa = classes.groupby("faixa", sort=False)["contagem"].sum()
+    legenda = [(f"{faixa}: {metrics.numero(n)}", cores[faixa]) for faixa, n in por_faixa.items() if n]
+    if nunca:
+        legenda.append((f"{painel.FAIXA_NUNCA}: {metrics.numero(nunca)}", cores[painel.FAIXA_NUNCA]))
+    quando = f" (lista de {momento:%d/%m/%Y})" if momento else ""
+    eixo = f"Dias entre o último acesso e a data da lista da plataforma{quando}"
+    if subtitulo is None:
+        subtitulo = (f"Cada coluna conta {unidade} pelo tempo sem acesso. Tracejado: últimos {janela} dias e "
+                     f"limite de acompanhamento ({limite} dias)")
+    return graficos.histograma(colunas, titulo, subtitulo, eixo, legenda)
+
+
+def comparacao_faixas(dados: pd.DataFrame, dimensoes: list[tuple[str, str]], ordem: list[str], cores: dict[str, str],
+                      titulo: str, subtitulo: str | None, chave: str, nota_texto: str | None = None,
+                      fonte: str | None = None, chamada_texto: str | None = None,
+                      sem_valor: str = "Não informado") -> None:
+    """Tempo desde o último acesso em cada categoria de uma ou mais dimensões (ex.: cargo, origem da vaga).
+
+    Uma linha por categoria, com o total ao lado do rótulo; com mais de uma dimensão, as linhas ficam em
+    blocos com o nome da dimensão. ``dados`` tem a coluna ``faixa_acesso`` e as colunas das dimensões;
+    ``ordem`` são as faixas mostradas e ``cores`` a cor de cada faixa (``graficos.cores_faixas``).
+    """
+    linhas, grupos, tabela = [], [], []
+    series: dict[str, list[int]] = {f: [] for f in ordem}
+    for nome, coluna in dimensoes:
+        cruz = pd.crosstab(dados[coluna].fillna(sem_valor), dados["faixa_acesso"]).reindex(columns=ordem, fill_value=0)
+        for valor in sorted(cruz.index, key=lambda v: (v == sem_valor, painel.chave_ordem(coluna, v))):
+            linhas.append(painel.rotulo(coluna, valor))
+            grupos.append(nome)
+            contagens = {f: int(cruz.loc[valor, f]) for f in ordem}
+            for f in ordem:
+                series[f].append(contagens[f])
+            tabela.append({"Dimensão": nome, "Categoria": painel.rotulo(coluna, valor), **contagens})
+    if not linhas:
+        vazio("Sem dados para a comparação no recorte.")
+        return
+    series = {f: v for f, v in series.items() if any(v)}
+    fig = graficos.barras_empilhadas_100(linhas, series, cores, titulo, subtitulo,
+                                         grupos=grupos if len(dimensoes) > 1 else None, mostrar_total=True)
+    grafico(fig, pd.DataFrame(tabela), chave, nota_texto, fonte, chamada_texto)
 
 
 def cabecalho_grafico(titulo: str, subtitulo: str | None = None, chamada_texto: str | None = None,

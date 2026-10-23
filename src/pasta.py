@@ -6,16 +6,22 @@ Moodle, .txt, ou planilha). Ao abrir, o painel confere esses arquivos pela soma 
 entrou, saiu ou mudou, importa a nova versão sozinho, com a mesma validação da Administração. Os
 arquivos originais nunca são alterados. A base escolar vem do pacote oficial do Inep, se ele já
 estiver no cache.
+
+O Moodle informa o último acesso como tempo decorrido ("3 dias 5 horas"). A data de referência da
+lista é a data e hora escritas no nome do arquivo (ex.: participantes_21out26_14h58.txt) ou, sem
+elas, o momento em que o arquivo foi gravado na pasta (data de modificação).
 """
 
 from __future__ import annotations
 
 import threading
 from dataclasses import dataclass, field
+from datetime import datetime, timezone
 from pathlib import Path
 
 from . import config, importacao, school_data
 from .loaders import CAMPOS_ATIVIDADE, CAMPOS_CADASTRO, ErroImportacao, ler_tabela, mapear_colunas
+from .normalization import momento_no_nome
 from .security import configurar_logging
 
 EXTENSOES = (".xlsx", ".csv", ".txt")
@@ -61,6 +67,15 @@ def classificar(nome: str, conteudo: bytes):
     return None, None
 
 
+def momento_do_arquivo(caminho: Path, fuso: str) -> tuple[datetime, str]:
+    """(momento em UTC, origem): data e hora escritas no nome do arquivo ou, sem elas, a data do arquivo."""
+    no_nome = momento_no_nome(caminho.name, fuso)
+    if no_nome is not None:
+        return no_nome, "nome do arquivo"
+    gravado = datetime.fromtimestamp(caminho.stat().st_mtime, timezone.utc).replace(microsecond=0)
+    return gravado, "data do arquivo"
+
+
 def _impressao(arquivos: list[Path]) -> tuple:
     """Identificação barata do estado da pasta (nome, tamanho, data de modificação)."""
     return tuple((p.name, p.stat().st_size, p.stat().st_mtime_ns) for p in arquivos)
@@ -76,23 +91,30 @@ def sincronizar(repo, pseudo, cfg) -> Resultado:
         if _ULTIMA_CONFERENCIA.get(chave) == impressao:
             return resultado
         tabelas: dict[str, list] = {"cadastro": [], "atividade": []}
+        caminhos: dict[str, Path] = {}
         for caminho in arquivos:
             fonte, tabela = classificar(caminho.name, caminho.read_bytes())
             if fonte:
                 tabelas[fonte].append(tabela)
+                caminhos[tabela.arquivo] = caminho
         resultado.arquivos = {f: [t.arquivo for t in ts] for f, ts in tabelas.items()}
         for fonte, lista in tabelas.items():
             if not lista:
                 continue
             ativa = repo.importacao_ativa(fonte) or {}
-            if sorted(a.get("sha256") for a in ativa.get("arquivos", [])) == sorted(t.sha256 for t in lista):
-                continue  # os mesmos arquivos já estão no painel
+            referencia, origem = None, None
+            if fonte == "atividade":  # várias listas: vale a mais recente
+                referencia, origem = max(momento_do_arquivo(caminhos[t.arquivo], cfg.fuso_horario) for t in lista)
+            mesmos = sorted(a.get("sha256") for a in ativa.get("arquivos", [])) == sorted(t.sha256 for t in lista)
+            if mesmos and ativa.get("referencia_em") == (referencia.isoformat() if referencia else None):
+                continue  # os mesmos arquivos, com a mesma data de referência, já estão no painel
             try:
                 if fonte == "cadastro":
                     previa = importacao.preparar_cadastro(lista, pseudo)
                 else:
-                    previa = importacao.preparar_atividade(lista, pseudo, None, cfg.fuso_horario,
-                                                           repo.parametros()["papeis_cursista"])
+                    previa = importacao.preparar_atividade(lista, pseudo, referencia, cfg.fuso_horario,
+                                                           repo.parametros()["papeis_cursista"],
+                                                           origem_referencia=origem)
                 if previa.pode_confirmar:
                     importacao.confirmar(repo, previa, USUARIO)
                     resultado.importadas.append(f"{ROTULOS[fonte]} ({', '.join(t.arquivo for t in lista)})")
